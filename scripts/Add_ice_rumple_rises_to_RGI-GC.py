@@ -141,7 +141,7 @@ def main():
 
     # 1. Concatenate all GeoDataFrames
     combined_gdf = gpd.GeoDataFrame(
-        pd.concat([only_icesheet, ice_shelf_gdf, ice_tongue_gdf], ignore_index=True),
+        pd.concat([only_icesheet, ice_shelf_gdf, ice_tongue_gdf, ice_rumple_gdf], ignore_index=True),
         crs=only_icesheet.crs
     )
 
