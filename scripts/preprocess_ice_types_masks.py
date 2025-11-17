@@ -70,25 +70,25 @@ def parse_arguments():
         description="Parse shapefile and data paths for geospatial processing."
     )
     parser.add_argument(
-        "--coast-file",
+        "--coast_file",
         type=Path,
         required=True,
         help="Path to the coastline shapefile (.shp)"
     )
     parser.add_argument(
-        "--glacier-complex",
+        "--glacier_complex",
         type=Path,
         required=True,
         help="Path to the glacier complex shapefile (.shp)"
     )
     parser.add_argument(
-        "--data-path",
+        "--data_path",
         type=Path,
         required=True,
         help="Path to the output or data directory"
     )
     parser.add_argument(
-        "--ice-rumples",
+        "--ice_rumples",
         type=Path,
         required=True,
         help="Path to the ice rumples shapefile (.shp)"
