@@ -1,0 +1,10 @@
+name: linkage-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - geopandas
+  - pandas
+  - numpy
+  - shapely
+  - matplotlib
