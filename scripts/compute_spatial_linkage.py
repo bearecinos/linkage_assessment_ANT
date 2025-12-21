@@ -1,8 +1,9 @@
 """
 This script preforms a spatial linkage assessment between
-two masks:
+three masks:
 
-1) A primary Ice-Type Mask (Interaction Mask)
+1) A primary Ice-Type Mask (Interaction Mask):
+interaction_mask.gpkg
 This mask represents the contiguous ice areas that may interact
 with or influence smaller glacial and ice caps systems (or ice rises).
 It includes:
@@ -11,12 +12,30 @@ It includes:
 - Ice tongue areas (from ADD coastline)
 - Ice rumple areas (also mapped by ADD coastline)
 
-2) Assessment mask: ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg
+We only account for ice shelves areas that originate from the main
+ice sheet.
+
+2) Secondary ice shelves mask: remaining_shelves_mask.gpkg
+This is a mask of ice shelves that originate from Antarctic Islands surrounding the
+main land
+
+3) Assessment mask: ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg
 
 This assessment is done based on how much a polygon in the
  Assessment mask shares its perimeter with the primary mask.
 
-Classification can be customised
+Detachment scoring is based on the percentage of perimeter overlap between polygons and the mainland ice interaction mask.
+Additional context on buttressing is derived from a secondary ice shelf mask.
+
+| Perimeter Overlap      | Score | Linkage Type            | Buttress Code | Buttress Source ID                        |
+|------------------------|-------|--------------------------|----------------|-----------------------------------------|
+| 90–100% (or >100%)     | 1.1   | Strong linkage           | None           | Buttressed by ice sheet/shelves (mainland) |
+| 80–90%                 | 1.2   |                          | None           | Buttressed by ice sheet/shelves (mainland) |
+| ...                    | ...   | ...                      | None           | Buttressed by ice sheet/shelves (mainland) |
+| 10–20%                 | 1.9   | Weak linkage             | None           | Buttressed by ice sheet/shelves (mainland) |
+| 0%                     | 2.0   | Completely detached       | 1.0           | Buttressed by non-mainland ice shelves  |
+| 0% + ≤10% shelf overlap| 2.0   | Completely detached       | 0.0           | Unclassified (not buttressed)           |
+
 
 Script done by B. Recinos (NERC IRF U. Edinburgh)
 
@@ -25,6 +44,7 @@ import sys
 import argparse
 from pathlib import Path
 import geopandas as gpd
+import pandas as pd
 import numpy as np
 
 def parse_arguments():
@@ -37,18 +57,6 @@ def parse_arguments():
         required=True,
         help="Path to the output or data directory"
     )
-    parser.add_argument(
-        "--weak_max",
-        type=float,
-        default=10.0,
-        help="Upper bound for weak linkage (e.g. 10.0)"
-    )
-    parser.add_argument(
-        "--medium_max",
-        type=float,
-        default=50.0,
-        help="Upper bound for medium linkage (e.g. 50.0)"
-    )
     return parser.parse_args()
 
 
@@ -56,6 +64,86 @@ def validate_paths(args):
     if not args.data_path.exists():
         print(f"Data path does not exist. Creating: {args.data_path}")
         args.data_path.mkdir(parents=True, exist_ok=True)
+
+
+def bucket_overlap(ratio=float):
+    """
+    Converts perimeter overlap ratios into detachment scores,
+    where lower overlap means higher detachment (higher score).
+    :param ratio, np.float()
+    :return: detachment score as np.float()
+    """
+    # keeps a maximum ratio of 100.0% overlap to
+    # avoid cases with > 100 % due to buffer inaccuracies
+    capped = min(ratio, 100.0)
+
+    # Calculate to which bucket ratio the % belongs to
+    # // 10 means integer division into bins of 10 (e.g., 85 → bin 8)
+    # - 1e-9 prevents rounding errors like 10.0 being mistakenly placed in the next bin
+    # + 1 shifts the range from 0-based to 1-based
+    bucket = int((capped - 1e-9) // 10) + 1 # e.g., 0–10% → bucket 1
+    bucket = min(bucket, 9)  # keeps the maximum bucket of 9
+
+    # Reverse the scale: 90–100% (bucket 9) → 1.1, 0–10% (bucket 1) → 1.9
+    # from less detachment to more detached
+    # TODO: tiny issues with buffer for very small polygons close to the main mask
+    reversed_bucket = 10 - bucket
+    return round(1 + reversed_bucket / 10, 2)
+
+
+def classify_polygon(row):
+    """
+    This function takes each row from a geopandas.Dataframe
+    (combined_final) and extracts the ratio value in order to
+    classify it.
+
+    :param row
+    :return: tuple with score, label, None, None
+    The last two None and None are for buttress properties for the second
+    classification.
+    """
+    ratio = row["ratio"]
+
+    # Check if the ratio is missing, that means that
+    # this is already classified as completely detached
+    # (no intersection → NaN ratio)
+    if pd.isna(ratio):
+        return (
+            2.0,
+            "Completely detached (0% shared perimeter)",
+            None,
+            row.get("source_id", None),
+        )
+
+    # Calls the helper function to compute the detachment score
+    # based on perimeter overlap
+    score = bucket_overlap(ratio)
+
+    # Determines to which 10% bucket the scores belongs to
+    # // 10 means integer division into bins of 10 (e.g., 85 → bin 8)
+    # - 1e-9 prevents rounding errors like 10.0 being mistakenly placed in the next bin
+    # + 1 shifts the range from 0-based to 1-based
+    bucket = int((min(ratio, 100.0) - 1e-9) // 10) + 1
+
+    # We probably need some message to translate the code above
+    label = f"Perimeter overlap {int((bucket-1)*10)}–{int(bucket*10)}%"
+
+    return score, label, None, None
+
+
+def assign_buttress_code(row, ratio_map):
+    """
+    Assigns a buttress_code to polygons with detachment_score == 2.0
+    based on overlap ratio with a secondary ice shelf mask.
+
+    :param row: A row from the GeoDataFrame (combined_final)
+    :param ratio_map: Dict mapping analysis_id to shared perimeter ratio
+    :return: 1.0 if overlap > 10%, else 0.0; None if not detached
+    """
+    if row["detachment_score"] != 2.0:
+        return None
+    ratio = ratio_map.get(row["analysis_id"], 0.0)
+    return 1.0 if ratio > 10 else 0.0
 
 
 def main():
@@ -81,7 +169,7 @@ def main():
     print("Shapefiles loaded and all reprojected to EPSG:3031 successfully.")
 
     # We make a big buffer in the interaction mask
-    interaction_mask['geometry'] = interaction_mask.geometry.buffer(100)
+    interaction_mask['geometry'] = interaction_mask.geometry.buffer(50)
 
     combined['total_area'] = combined.geometry.area
     combined['perimeter'] = combined.geometry.length
@@ -90,7 +178,7 @@ def main():
     intersection_result = gpd.overlay(combined, interaction_mask, how='intersection')
 
     # union of the interaction mask geometry
-    mask_union = interaction_mask.unary_union
+    mask_union = interaction_mask.union_all()
     # find which combined geometries intersect with the mask
     intersects_mask = combined.geometry.intersects(mask_union)
     # rows that did NOT intersect need to be dropped in intersection_result
@@ -105,45 +193,100 @@ def main():
     # And the ratio
     intersection_result['ratio'] = (intersection_result['perimeter_shared'] / intersection_result['perimeter']) * 100
 
-    # We separate the dataset according to the ratio above
-    # Weak: 0 < ratio <= 10
-    weak_linkage = intersection_result[
-        (intersection_result["ratio"] > 0) & (intersection_result["ratio"] <= args.weak_max)
-        ]
+    # Aggregate intersection results from the overlap per polygon
+    intersection_summary = (
+        intersection_result
+        .groupby("analysis_id", as_index=False)
+        .agg({
+            "perimeter_shared": "sum",
+            "ratio": "max"
+        })
+    )
 
-    # Medium: 10 < ratio <= 50
-    medium_linkage = intersection_result[
-        (intersection_result["ratio"] > args.weak_max) & (intersection_result["ratio"] <= args.medium_max)
-        ]
+    # Build the combined final geopandas dataframe
+    combined_final = combined.merge(
+        intersection_summary,
+        on="analysis_id",
+        how="left"
+    )
 
-    # Strong: ratio > 50
-    strong_linkage = intersection_result[
-        intersection_result["ratio"] > args.medium_max
-        ]
-
-    # Just in case lets make a copy or the combined "original" analysis mask
-    combined_final = combined.copy()
-
-    # Initialize classification column with default
+    # We add classification fields that we will fill later
     combined_final["detachment_score"] = np.nan
     combined_final["detachment_desc"] = "unclassified"
+    combined_final["buttress_code"] = None
+    combined_final["buttress_source_id"] = None
 
-    # Update classification using analysis_id from each subset
+    # Assign 2.0 to polygons with no interaction
     combined_final.loc[
         combined_final["analysis_id"].isin(no_intersection_combined["analysis_id"]),
-        ["detachment_score", "detachment_desc"]] = [2.0, "Completely detached (no shared perimeter)"]
+        ["detachment_score", "detachment_desc"]
+        ] = [2.0, "Completely detached (no shared perimeter)"]
 
-    combined_final.loc[combined_final["analysis_id"].isin(weak_linkage["analysis_id"]),
-        ["detachment_score", "detachment_desc"]] = [1.7, "Weak linkage (low shared perimeter ratio)"]
+    combined_final[[
+        "detachment_score",
+        "detachment_desc",
+        "buttress_code",
+        "buttress_source_id"
+    ]] = combined_final.apply(classify_polygon, axis=1, result_type="expand")
 
-    combined_final.loc[combined_final["analysis_id"].isin(medium_linkage["analysis_id"]),
-        ["detachment_score", "detachment_desc"]] = [1.5, "Partial linkage (moderate shared perimeter ratio)"]
+    # No polygon should lose geometry
+    assert combined_final.geometry.notna().all()
 
-    combined_final.loc[combined_final["analysis_id"].isin(strong_linkage["analysis_id"]),
-        ["detachment_score", "detachment_desc"]] = [1.0, "Strong linkage (high shared perimeter ratio)"]
+    # Detached polygons must have NaN ratio
+    assert combined_final.loc[combined_final.detachment_score == 2.0,
+                             "ratio"].isna().all()
 
-    file_suffix = f"weak{int(args.weak_max)}_medium{int(args.medium_max)}"
-    filename = Path(args.data_path) / f"final_classification_{file_suffix}.gpkg"
+    # Overlapping polygons must be 1.x
+    assert combined_final.loc[combined_final.ratio.notna(),
+                             "detachment_score"].between(1.1, 1.9).all()
+
+    ##----------------- Next classification ------------------------------
+    secondary_shelf_fp = Path(args.data_path) / "remaining_shelves_mask.gpkg"
+    assert secondary_shelf_fp.exists(), "Secondary ice shelf mask not found"
+    secondary_shelf_mask = gpd.read_file(secondary_shelf_fp)
+
+    # Optional: buffer it
+    secondary_shelf_mask['geometry'] = secondary_shelf_mask.geometry.buffer(50)
+
+    # Ensure CRS match
+    assert secondary_shelf_mask.crs == combined.crs
+
+    # Filter only fully detached polygons
+    fully_detached = combined_final[combined_final["detachment_score"] == 2.0].copy()
+
+    # Now let's do again another subclassification if they are buttressed
+    # by a different ice shelf that does not come from the main land
+    # Spatial intersection
+    intersection_with_shelves = gpd.overlay(
+        fully_detached,
+        secondary_shelf_mask,
+        how="intersection"
+    )
+
+    intersection_with_shelves["perimeter_shared"] = intersection_with_shelves.geometry.length
+    intersection_with_shelves["ratio"] = (intersection_with_shelves["perimeter_shared"] /
+                                          intersection_with_shelves["perimeter"]
+                                          ) * 100
+
+    # Keep max ratio per analysis_id
+    ratio_map = intersection_with_shelves.groupby("analysis_id")["ratio"].max().to_dict()
+
+    combined_final["buttress_code"] = combined_final.apply(
+        assign_buttress_code,
+        axis=1,
+        args=(ratio_map,)
+    )
+
+    combined_final.loc[
+        (combined_final["detachment_score"] == 2.0) & (combined_final["buttress_code"] == 1.0),
+        "buttress_source_id"
+    ] = "buttressed by non-mainland ice shelves"
+
+    combined_final["buttress_source_id"] = combined_final["buttress_source_id"].fillna("unclassified")
+
+    print(combined_final["detachment_score"].value_counts(dropna=False).sort_index())
+
+    filename = Path(args.data_path) / f"final_classification_buckets.gpkg"
     combined_final.to_file(filename, driver="GPKG")
 
 if __name__ == "__main__":

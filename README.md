@@ -55,14 +55,15 @@ This script:
 
 - **Classification scheme (to be discussed)**
 
-| Detachment score | Description                                               |
-|------------------|-----------------------------------------------------------|
-| **1.0**          | Strong linkage (high shared perimeter ratio)              |
-| **1.5**          | Partial linkage (moderate shared perimeter ratio)         |
-| **1.7**          | Weak linkage (low shared perimeter ratio)                 |
-| **2.0**          | Completely detached (no shared perimeter with the interaction mask) |
+| **Perimeter overlap ratio**           | **Detachment score** | **Linkage description**        | **Buttress code** | **Buttress source ID**                                   |
+|---------------------------------------|----------------------|--------------------------------|-------------------|----------------------------------------------------------|
+| **90–100% (or >100%)**                | 1.1                  | Strong linkage                 | *None*            | buttressed by ice sheet / shelves draining from mainland |
+| **80–90%**                            | 1.2                  |                                | *None*            | buttressed by ice sheet / shelves draining from mainland |
+| **...**                               | ...                  | ...                            | *None*            | buttressed by ice sheet / shelves draining from mainland |
+| **10–20%**                            | 1.9                  | Weak linkage (high detachment) | *None*            | buttressed by ice sheet / shelves draining from mainland |
+| **0% overlap**                        | 2.0                  | Completely detached            | 1.0               | buttressed by non-mainland ice shelves                   |
+| **0% + ≤10% overlap with shelf mask** | 2.0                  | Completely detached            | 0.0               | unclassified (or leave blank non buttressed)             |
 
-Thresholds for “weak” and “medium” linkage are configurable at runtime via `--weak_max` and `--medium_max` params. 
 
 Outputs:
 - `final_classification_weak{X}_medium{Y}.gpkg`: GeoPackage with one row per polygon, including its `detachment_score` and `detachment_description` and original RGI-ids or IRR-ids.

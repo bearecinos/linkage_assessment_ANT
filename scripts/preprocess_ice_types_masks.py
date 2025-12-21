@@ -175,8 +175,25 @@ def main():
 
     interaction_mask['geometry'] = interaction_mask['geometry'].apply(remove_holes)
 
+    # Now we dissolve the interaction mask to select ice shelves which are not
+    # contiguous to ice shelves that originate from the main ice sheet.
+    explode_mask = interaction_mask.explode(ignore_index=True)
+    # Let's select the largest mask, which should correspond to AIS and all its ice shelves attached.
+    areas = explode_mask.geometry.area
+    largest_idx = areas.idxmax()
+    print(largest_idx)
+
+    # Now select only the ice sheet
+    ice_from_mainland = explode_mask.loc[[largest_idx]].copy()
+
     inter_mask_fp = Path(args.data_path) / "interaction_mask.gpkg"
-    interaction_mask.to_file(inter_mask_fp, driver="GPKG")
+    ice_from_mainland.to_file(inter_mask_fp, driver="GPKG")
+
+    # We also save the remaining ice shelves for post-processing
+    remaining_ice_shelves = explode_mask.drop(index=largest_idx).copy()
+
+    shelves_mask_fp = Path(args.data_path) / "remaining_shelves_mask.gpkg"
+    remaining_ice_shelves.to_file(shelves_mask_fp, driver="GPKG")
 
     print('-------------------------')
     print('Finished with first mask')
