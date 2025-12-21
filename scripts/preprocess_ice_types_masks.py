@@ -11,7 +11,7 @@ Generates a dissolved polygon that includes:
 - Ice shelf, ice tongue, and ice rumple areas (from ADD surface types)
 
 This mask represents the contiguous ice-covered regions connected
-to the main ice sheet and may influence glacier systems or ice rise.
+to the main ice sheet and may influence glacier systems or ice rises / rumples.
 
 2) Detached Ice Shelf Mask
 Identifies and extracts ice shelves or floating ice areas **disconnected**

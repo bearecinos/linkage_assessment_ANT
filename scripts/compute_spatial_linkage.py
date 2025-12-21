@@ -3,26 +3,24 @@ This script preforms a spatial linkage assessment between
 three masks:
 
 1) Primary Ice-Type Mask (interaction_mask.gpkg)
-This mask represents contiguous ice that may interact with or influence smaller glacier complexes,
-ice rises and rumples. It includes:
+This mask represents contiguous ice that may interact with or influence glacier complexes on
+Antarctic islands, ice rises and rumples.
+It includes:
 - Ice sheet extent (from ADD coastline)
 - Mainland ice-shelf areas (from ADD coastline)
 - Ice tongue areas (from ADD coastline)
-- Ice rumple / ice-rise areas (from ADD coastline, this is necessary as these rumples are not
- in the Ice and rumples database and need to be accounted as part of the ice sheet)
-
 We only include ice-shelf areas that originate from the mainland ice sheet in this primary mask.
 
 2) Secondary ice-shelves mask (remaining_shelves_mask.gpkg)
 Mask of ice shelves that originate from ice on Antarctic islands
-(i.e., shelves not connected to the mainland ice sheet).
+(i.e., shelves not connected to the mainland ice sheet, this is use for post-processing).
 
 3) Assessment mask (ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg)
 Polygons to be assessed (glacier complexes, ice rises, etc.).
-This assessment computes the percentage of each polygon perimeter from the assessment mask
+This assessment computes the percentage of each **polygon perimeter from the assessment mask**
 that is shared with the primary interaction mask.
-Detachment scoring is assigned from that perimeter-overlap percentage.
-Additional buttressing context is derived from the secondary (island-origin) shelf mask.
+- A detachment scoring is assigned from that perimeter-overlap percentage.
+- An additional buttressing context is derived from the secondary (island-origin) shelf mask.
 
 | Perimeter Overlap      | Score | Linkage Type            | Buttress Code | Buttress Source ID                        |
 |------------------------|-------|--------------------------|----------------|-----------------------------------------|
@@ -85,9 +83,8 @@ def bucket_overlap(ratio=float):
     bucket = int((capped - 1e-9) // 10) + 1 # e.g., 0–10% → bucket 1
     bucket = min(bucket, 9)  # keeps the maximum bucket of 9
 
-    # Reverse the scale: 90–100% (bucket 9) → 1.1, 0–10% (bucket 1) → 1.9
+    # Reverse the scale: 90–100% of overlap (bucket 9) → 1.1, 0–10% (bucket 1) → 1.9
     # from less detachment to more detached
-    # TODO: tiny issues with buffer for very small polygons close to the main mask
     reversed_bucket = 10 - bucket
     return round(1 + reversed_bucket / 10, 2)
 
@@ -100,8 +97,8 @@ def classify_polygon(row):
 
     :param row
     :return: tuple with score, label, None, None
-    The last two None and None are for buttress properties for the second
-    classification.
+    The last two None's are placeholders for buttress properties
+    to be added on the second classification.
     """
     ratio = row["ratio"]
 
