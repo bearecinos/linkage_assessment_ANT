@@ -2,30 +2,26 @@
 This script preforms a spatial linkage assessment between
 three masks:
 
-1) A primary Ice-Type Mask (Interaction Mask):
-interaction_mask.gpkg
-This mask represents the contiguous ice areas that may interact
-with or influence smaller glacial and ice caps systems (or ice rises).
-It includes:
+1) Primary Ice-Type Mask (interaction_mask.gpkg)
+This mask represents contiguous ice that may interact with or influence smaller glacier complexes,
+ice rises and rumples. It includes:
 - Ice sheet extent (from ADD coastline)
-- Ice shelf areas (from ADD coastline)
+- Mainland ice-shelf areas (from ADD coastline)
 - Ice tongue areas (from ADD coastline)
-- Ice rumple areas (also mapped by ADD coastline)
+- Ice rumple / ice-rise areas (from ADD coastline)
 
-We only account for ice shelves areas that originate from the main
-ice sheet.
+We only include ice-shelf areas that originate from the mainland ice sheet in this primary mask.
 
-2) Secondary ice shelves mask: remaining_shelves_mask.gpkg
-This is a mask of ice shelves that originate from Antarctic Islands surrounding the
-main land
+2) Secondary ice-shelves mask (remaining_shelves_mask.gpkg)
+Mask of ice shelves that originate from ice on Antarctic islands
+(i.e., shelves not connected to the mainland ice sheet).
 
-3) Assessment mask: ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg
-
-This assessment is done based on how much a polygon in the
- Assessment mask shares its perimeter with the primary mask.
-
-Detachment scoring is based on the percentage of perimeter overlap between polygons and the mainland ice interaction mask.
-Additional context on buttressing is derived from a secondary ice shelf mask.
+3) Assessment mask (ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg)
+Polygons to be assessed (glacier complexes, ice rises, etc.).
+This assessment computes the percentage of each polygon perimeter from the assessment mask
+that is shared with the primary interaction mask.
+Detachment scoring is assigned from that perimeter-overlap percentage.
+Additional buttressing context is derived from the secondary (island-origin) shelf mask.
 
 | Perimeter Overlap      | Score | Linkage Type            | Buttress Code | Buttress Source ID                        |
 |------------------------|-------|--------------------------|----------------|-----------------------------------------|
@@ -36,9 +32,13 @@ Additional context on buttressing is derived from a secondary ice shelf mask.
 | 0%                     | 2.0   | Completely detached       | 1.0           | Buttressed by non-mainland ice shelves  |
 | 0% + ≤10% shelf overlap| 2.0   | Completely detached       | 0.0           | Unclassified (not buttressed)           |
 
+Notes / conventions
+- Perimeter Overlap is computed as percentage of the assessment polygon’s perimeter
+that touches the primary interaction mask.
+- Score uses the decimal detachment scheme: 1.1 … 1.9 (progressively weaker linkage), 2.0 = fully detached.
+- Buttress Code: 1.0 = buttressed by a non-mainland (island-origin) shelf; 0.0 = not buttressed / unclassified.
 
-Script done by B. Recinos (NERC IRF U. Edinburgh)
-
+Script done by B. Recinos (NERC IRF, U. Edinburgh)
 """
 import sys
 import argparse
