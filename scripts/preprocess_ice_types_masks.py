@@ -3,25 +3,32 @@ This script splits the database of High resolution vector polygons of
 the Antarctic coastline (from SCAR - ADD) into different masks
 to conduct a linkage assessments.
 
-1) Primary Ice-Type Mask (Interaction Mask)
-This mask represents the contiguous ice areas that may interact
-with or influence smaller glacial and ice caps systems (or ice rises).
-It includes:
-- Ice sheet extent (from ADD coastline)
-- Ice shelf areas (from ADD coastline)
-- Ice tongue areas (from ADD coastline)
-- Ice rumple areas (also mapped by ADD coastline)
+It performs the following:
 
-2) Assessment mask
-The code sub-selects coastline polygons and assigns to each polygon
-covering a glacier complex or ice rise with an ID. This ID is based on
-the Randolph Glacier Inventory (v7) glacier complexes `rgi_id` column
-or the Ice rises and rumples database v1.0 (`id_icerise`).
-If the data set only appears in RGI, the polygon has only `rgi_id`
-and the `id_icerise` is set to None (same the other way around).
+1) Creates an interaction Mask (Primary Ice-Type Mask)
+Generates a dissolved polygon that includes:
+- Antarctic Ice Sheet extent (from ADD 'land' polygons)
+- Ice shelf, ice tongue, and ice rumple areas (from ADD surface types)
 
-Script done by B. Recinos (NERC IRF U. Edinburgh)
+This mask represents the contiguous ice-covered regions connected
+to the main ice sheet and may influence glacier systems or ice rise.
 
+2) Detached Ice Shelf Mask
+Identifies and extracts ice shelves or floating ice areas **disconnected**
+from the Antarctic Ice Sheet. These are typically **island-sourced ice shelves**
+that drain **independent glacial systems**, not contiguous with the main continent.
+These are saved separately for post-processing or analysis.
+
+3) Glacier Complex and Ice Rise Linkage Assessment
+Associates ADD coastline polygons with glacier complexes (from RGIv7)
+and/or ice rises and rumples (from Ice Rises and Rumples Database v1.0).
+Each polygon receives:
+- `rgi_ids`: List of associated glacier complex IDs
+- `id_icerise`: List of associated ice rise/rumple IDs
+- `analysis_id`: Unique row index for tracking
+Final output: a combined GeoPackage with linked glacier and ice rise polygons.
+
+Script by B. Recinos (NERC IRF U. Edinburgh)
 """
 import sys
 import geopandas as gpd

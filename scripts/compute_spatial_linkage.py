@@ -8,7 +8,8 @@ ice rises and rumples. It includes:
 - Ice sheet extent (from ADD coastline)
 - Mainland ice-shelf areas (from ADD coastline)
 - Ice tongue areas (from ADD coastline)
-- Ice rumple / ice-rise areas (from ADD coastline)
+- Ice rumple / ice-rise areas (from ADD coastline, this is necessary as these rumples are not
+ in the Ice and rumples database and need to be accounted as part of the ice sheet)
 
 We only include ice-shelf areas that originate from the mainland ice sheet in this primary mask.
 
