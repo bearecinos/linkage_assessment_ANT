@@ -38,6 +38,8 @@ that touches the primary interaction mask.
 - Buttress Code: 1.0 = buttressed by a non-mainland (island-origin) shelf; 0.0 = not buttressed / unclassified.
 
 Script done by B. Recinos (NERC IRF, U. Edinburgh)
+Portions of this code were generated or optimized using
+Microsoft Copilot
 """
 import sys
 import argparse

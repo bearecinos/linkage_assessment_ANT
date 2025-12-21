@@ -29,6 +29,8 @@ Each polygon receives:
 Final output: a combined GeoPackage with linked glacier and ice rise polygons.
 
 Script by B. Recinos (NERC IRF U. Edinburgh)
+Portions of this code were generated or optimized using
+Microsoft Copilot
 """
 import sys
 import geopandas as gpd
