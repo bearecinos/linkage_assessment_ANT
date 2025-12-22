@@ -69,7 +69,7 @@ This script performs two main operations:
 
 - **Classification scheme (to be discussed)**
 
-**Please provide community feedback on the [Github Issues](https://github.com/bearecinos/linkage_assessment_ANT)**
+**Please provide community feedback on the [Github Issues](https://github.com/bearecinos/linkage_assessment_ANT/issues)**
 
 | Perimeter Overlap (%)   | Detachment Score | Description    | Buttress Code | Buttress Source ID               |
 | ----------------------- | ---------------- | -------------- | ------------- | -------------------------------- |
