@@ -69,6 +69,8 @@ This script performs two main operations:
 
 - **Classification scheme (to be discussed)**
 
+**Please provide community feedback on the [Github Issues](https://github.com/bearecinos/linkage_assessment_ANT)**
+
 | Perimeter Overlap (%)   | Detachment Score | Description    | Buttress Code | Buttress Source ID               |
 | ----------------------- | ---------------- | -------------- | ------------- | -------------------------------- |
 | 90–100%                 | 1.1              | Strong linkage | None          | Buttressed by mainland ice       |
