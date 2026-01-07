@@ -96,6 +96,5 @@ Celia Baumhoer, Beatriz Recinos Rivas, Bertie Miles, Fabien Maussion, Ken Mankof
 
 Citation
 --------
-
+Recinos, B., & Baumhoer, C. (2026). bearecinos/linkage_assessment_ANT: Spatial linkage assessment for Glacier Complexes and Ice rises and rumples (Antarctic Region, RGIv7) — Pre-release (v1.0.0-beta.1). Zenodo.
 [![DOI](https://zenodo.org/badge/1091078829.svg)](https://doi.org/10.5281/zenodo.18175061)
-reStructuredText
