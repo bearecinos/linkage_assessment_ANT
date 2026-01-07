@@ -93,3 +93,9 @@ python compute_spatial_linkage.py \
 Contributors of data, guidance or code
 ------------
 Celia Baumhoer, Beatriz Recinos Rivas, Bertie Miles, Fabien Maussion, Ken Mankoff and Regine Hock
+
+Citation
+--------
+
+[![DOI](https://zenodo.org/badge/1091078829.svg)](https://doi.org/10.5281/zenodo.18175061)
+reStructuredText
