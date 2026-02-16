@@ -74,6 +74,10 @@ def bucket_overlap(ratio=float):
     :param ratio, np.float()
     :return: detachment score as np.float()
     """
+    # Treat <=0 as fully detached
+    if ratio is None or ratio <= 0:
+        return 2.0
+
     # keeps a maximum ratio of 100.0% overlap to
     # avoid cases with > 100 % due to buffer inaccuracies
     capped = min(ratio, 100.0)
@@ -83,11 +87,10 @@ def bucket_overlap(ratio=float):
     # - 1e-9 prevents rounding errors like 10.0 being mistakenly placed in the next bin
     # + 1 shifts the range from 0-based to 1-based
     bucket = int((capped - 1e-9) // 10) + 1 # e.g., 0–10% → bucket 1
-    bucket = min(bucket, 9)  # keeps the maximum bucket of 9
+    bucket = min(bucket, 10) #Handles ratio=100
+    bucket = max(bucket, 2) #Handles ratio in (0, 10]:
 
-    # Reverse the scale: 90–100% of overlap (bucket 9) → 1.1, 0–10% (bucket 1) → 1.9
-    # from less detachment to more detached
-    reversed_bucket = 10 - bucket
+    reversed_bucket = 11 - bucket  # 10->1 (1.1), 2->9 (1.9)
     return round(1 + reversed_bucket / 10, 2)
 
 
@@ -115,6 +118,16 @@ def classify_polygon(row):
             row.get("source_id", None),
         )
 
+    # ratio == 0 -> fully detached (per your table)
+    if ratio <= 0:
+        return (
+            2.0,
+            "Completely detached (0% shared perimeter)",
+            None,
+            row.get("source_id", None),
+        )
+
+
     # Calls the helper function to compute the detachment score
     # based on perimeter overlap
     score = bucket_overlap(ratio)
@@ -124,6 +137,7 @@ def classify_polygon(row):
     # - 1e-9 prevents rounding errors like 10.0 being mistakenly placed in the next bin
     # + 1 shifts the range from 0-based to 1-based
     bucket = int((min(ratio, 100.0) - 1e-9) // 10) + 1
+    bucket = min(bucket, 10)
 
     # We probably need some message to translate the code above
     label = f"Perimeter overlap {int((bucket-1)*10)}–{int(bucket*10)}%"
@@ -233,8 +247,8 @@ def main():
     assert combined_final.geometry.notna().all()
 
     # Detached polygons must have NaN ratio
-    assert combined_final.loc[combined_final.detachment_score == 2.0,
-                             "ratio"].isna().all()
+    detached_ratio = combined_final.loc[combined_final.detachment_score == 2.0, "ratio"]
+    assert (detached_ratio.isna() | (detached_ratio <= 0)).all()
 
     # Overlapping polygons must be 1.x
     assert combined_final.loc[combined_final.ratio.notna(),

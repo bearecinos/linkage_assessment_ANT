@@ -74,6 +74,41 @@ def is_real_glacier_overlap(island_geom, union_polygon, min_ratio=0.05):
     return ratio > min_ratio
 
 
+def _unique_scalar(s=pd.Series):
+    """
+    Extracts unique values as scalars from the list
+    of each row in the pandas.dataframe.
+    :param s: row of the pandas dataframe as pd.Series
+    :return: value
+    """
+    uniques = pd.unique(s.dropna())
+    return uniques[0] if len(uniques) > 0 else None
+
+
+def unwrap(val):
+    """
+    Unwraps values for each row (list)
+    in the geopandas.Dataframe
+    :param val:
+    :return: scalar or None for nans
+    """
+    if isinstance(val, list) and val:
+        return val[0]  # take first if list not empty
+    return None       # fallback for empty list, None, NaN
+
+
+def unique_list(s=pd.Series):
+    """Return unique, non-null values as a Python list (stable enough for IDs)."""
+    return list(pd.unique(s.dropna()))
+
+
+def unique_int_list(s: pd.Series) -> list[int]:
+    vals = pd.unique(s.dropna())
+    # If vals are floats like 355.0 (because NaNs forced float dtype),
+    # cast safely to ints.
+    return [int(x) for x in vals]
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Parse shapefile and data paths for geospatial processing."
@@ -246,14 +281,36 @@ def main():
     print('Island with glacier complexes')
     print(islands_with_glacier_complex.head())
 
+    # Cross-fill: for the SAME ADD polygons that intersect glacier complexes,
+    # also capture any intersecting ice rises/rumples IDs.
+    island_gc_to_rumple_join = gpd.sjoin(
+        islands_with_glacier_complex[['geometry']],  # left: ADD islands w/ GC
+        rise_rumple[['id_icerise', 'geometry']],  # right: rises/rumples
+        how='left',
+        predicate='intersects'
+    )
+
+    id_icerise_list_per_island = (
+        island_gc_to_rumple_join.groupby(island_gc_to_rumple_join.index)['id_icerise']
+        .apply(unique_int_list)
+        .rename('id_icerise')
+    )
+
+    islands_with_glacier_complex = islands_with_glacier_complex.join(id_icerise_list_per_island)
+    # Ensure empty list instead of NaN for islands with no rumple/rise overlap
+    islands_with_glacier_complex["id_icerise"] = islands_with_glacier_complex["id_icerise"].apply(
+        lambda v: v if isinstance(v, list) else None
+    )
+
     # Adding unmatch geometries for a complete data set
     matched_glacier_idxs = island_glacier_join['index_right'].dropna().unique()
     unmatched_glaciers = glacier_complex.drop(index=matched_glacier_idxs).copy()
     unmatched_glaciers['rgi_ids'] = unmatched_glaciers.apply(lambda row: [row['rgi_id']],
                                                              axis=1)
-    unmatched_glaciers = unmatched_glaciers[['geometry', 'rgi_ids']]
+    unmatched_glaciers['id_icerise'] = [[] for _ in range(len(unmatched_glaciers))]
+    unmatched_glaciers = unmatched_glaciers[['geometry', 'rgi_ids', 'id_icerise']]
 
-    glaciers_final = pd.concat([islands_with_glacier_complex[['geometry', 'rgi_ids']],
+    glaciers_final = pd.concat([islands_with_glacier_complex[['geometry', 'rgi_ids', 'id_icerise']],
                                 unmatched_glaciers],
                                ignore_index=True)
 
@@ -284,21 +341,24 @@ def main():
     # Do a spatial join on those with the ice rumple and rises database
     island_rumple_join = gpd.sjoin(
         islands_with_rumples_rises[['geometry']],  # left: islands
-        rise_rumple[['id_icerise', 'geometry']],  # right: glacier complexes
+        rise_rumple[['id_icerise', 'type', 'type_text', 'geometry']], # keep ice type categories
         how='left',
         predicate='intersects'
     )
 
     ## Add to each polygon from ADD coastline the corresponding
-    # ice rise id
-    rumple_list_per_island = (
-        island_rumple_join.groupby(island_rumple_join.index)['id_icerise']
-        .apply(lambda s: list(s.dropna().unique()))
-        .rename("id_icerise")
+    # ice rise id and ice types
+    agg_per_island = (
+        island_rumple_join.groupby(island_rumple_join.index)
+        .agg(
+            id_icerise=("id_icerise", _unique_scalar),
+            ice_type=("type", _unique_scalar),
+            ice_type_text=("type_text", _unique_scalar),
+        )
     )
 
     # Attach the glacier ID list back to the islands GeoDataFrame
-    islands_with_rumples_rises = islands_with_rumples_rises.join(rumple_list_per_island)
+    islands_with_rumples_rises = islands_with_rumples_rises.join(agg_per_island)
 
     print('Coastline polygons (island) that are ice rises and rumples')
     print(islands_with_rumples_rises.head())
@@ -307,11 +367,22 @@ def main():
     # Adding unmatch geometries
     matched_rumple_idxs = island_rumple_join['index_right'].dropna().unique()
     unmatched_rumples = rise_rumple.drop(index=matched_rumple_idxs).copy()
+
     unmatched_rumples['id_icerise'] = unmatched_rumples.apply(lambda row: [row['id_icerise']],
                                                               axis=1)
-    unmatched_rumples = unmatched_rumples[['geometry', 'id_icerise']]
+    unmatched_rumples["ice_type"] = unmatched_rumples["type"].apply(lambda x: [x] if pd.notna(x) else [])
+    unmatched_rumples["ice_type_text"] = unmatched_rumples["type_text"].apply(lambda x: [x] if pd.notna(x) else [])
+    unmatched_rumples = unmatched_rumples[["geometry", "id_icerise", "ice_type", "ice_type_text"]]
 
-    rumples_final = pd.concat([islands_with_rumples_rises[['geometry', 'id_icerise']],
+    # Making sure values are not store in each row as list but as a single scalar
+    unmatched_rumples["id_icerise"] = unmatched_rumples["id_icerise"].apply(unwrap)
+    unmatched_rumples["ice_type"] = unmatched_rumples["ice_type"].apply(unwrap)
+    unmatched_rumples["ice_type_text"] = unmatched_rumples["ice_type_text"].apply(unwrap)
+
+    rumples_final = pd.concat([islands_with_rumples_rises[["geometry",
+                                                           "id_icerise",
+                                                           "ice_type",
+                                                           "ice_type_text"]],
                                unmatched_rumples],
                               ignore_index=True)
 
@@ -329,6 +400,10 @@ def main():
     # coastline back to the RGIv7 and the ice rise and rumples v1.0
     if 'id_icerise' not in glaciers_final.columns:
         glaciers_final['id_icerise'] = None
+    if 'ice_type' not in glaciers_final.columns:
+        glaciers_final['ice_type'] = int(0)
+    if 'ice_type_text' not in glaciers_final.columns:
+        glaciers_final['ice_type_text'] = 'Glacier complex'
     if 'rgi_ids' not in rumples_final.columns:
         rumples_final['rgi_ids'] = None
 
@@ -338,10 +413,6 @@ def main():
     # Drop duplicate geometries
     # We drop geometries that are exactly equal (bitwise comparison)
     combined = combined[~combined.geometry.duplicated(keep='first')].copy()
-
-    combined['id_icerise'] = combined['id_icerise'].apply(
-        lambda lst: [int(x) for x in lst if x is not None] if isinstance(lst, list) else None
-    )
 
     combined['analysis_id'] = combined.index
 
