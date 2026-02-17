@@ -190,12 +190,12 @@ def main():
     # - ice shelf
     # - ice tongue
     # - rumple
-    # These form the initial Level 0 + interacting surfaces before buffered
-    # masking removes disconnected shelves.
     ice_shelf_gdf = ice_type_gdfs['ice shelf']
     ice_tongue_gdf = ice_type_gdfs['ice tongue']
     ice_rumple_gdf = ice_type_gdfs['rumple']
 
+    # These are needed to understand what is buttressed by main land ice
+    # or other
     remaining_shelves = os.path.join(args.data_path, 'remaining_shelves_mask.gpkg')
     other_shelves = gpd.read_file(remaining_shelves)
 
@@ -204,7 +204,7 @@ def main():
 
     only_icesheet['surface'] = 'Ice sheet'
 
-    # Combine first version of Level 0
+    # Combine in a mask the first version of Level 0
     combined_gdf = gpd.GeoDataFrame(
         pd.concat([only_icesheet, ice_shelf_gdf, ice_tongue_gdf, ice_rumple_gdf],
                   ignore_index=True),
@@ -212,18 +212,19 @@ def main():
     )
 
     # We need to remove the other_shelves that are not connected via
-    # anything to the main land
+    # anything to the mainland ice
     mask = other_shelves.dissolve()  # single (multi)polygon row
 
     # Use the 'remaining_shelves_mask' dataset to erase shelves that are not
-    # physically connected to the main land. This produces the cleaned
-    # initial Level 0 base set.
+    # physically connected to the main land. This produces a cleaned mask
+    # for the initial Level 0 dataset.
     combined_erased = gpd.overlay(combined_gdf,
                                   mask,
                                   how="difference",
                                   keep_geom_type=True)
 
-    # Add extra columns to combine with final_df later
+    # Add extra columns to combine the geopandas.Dataframes easier
+    # later
     combined_erased = combined_erased.assign(
         rgi_ids=[["RGI2000-v7.0-C-20-00000"]] * len(combined_erased),  # list per row
         id_icerise=None,
@@ -241,20 +242,21 @@ def main():
     combined_erased["total_area"] = combined_erased.geometry.area
     combined_erased["perimeter"] = combined_erased.geometry.length
 
-    # Make sure final_df also has a surface so we can combined
+    # Make sure final_df also has a surface column so we can combined
     # ice bodies classified as Level 0 with the main Level 0 mask
     final_df['surface'] = None
 
-    # Partition polygons into Level 0–3 using detachment_score and buttress_code.
+    # Partition polygons from final_df into Level 0–3
+    # using detachment_score and buttress_code.
     # These groups come straight from perimeter overlap metrics prior to
-    # indirect-connection correction.
+    # from running this code. We start with the easy group Level 0 and 3.
     Level_0 = final_df.loc[final_df["detachment_score"].between(args.level0_min_score,
                                                                 args.level0_max_score,
                                                                 inclusive="both")].copy()
 
     Level_0_from_final_df = pd.concat([Level_0, combined_erased], ignore_index=True)
 
-    # Now those completely detached and buttressed by ice from the mainland
+    # Now lets pick those completely detached and buttressed by ice from the mainland
     Level_3_from_final_df = final_df.loc[final_df["detachment_score"].eq(2)
                                          & final_df["buttress_code"].eq(0)].copy()
 
@@ -263,16 +265,16 @@ def main():
                                                                               args.level1_max_score,
                                                                               inclusive="both")].copy()
 
-    # Now everything with a perimeter overlaop between level2_min_score and level2_max_score
-    # We will still need to add anything in Level 3 that
-    # has an indirect connection with 0-2
+    # Now everything with a perimeter overlap between level2_min_score and level2_max_score
+    # We will still need to add anything in Level 3 that has an indirect connection with 0-2.
+    # After doing another interaction mask analysis
     Level_2_from_final_df = final_df.loc[final_df["detachment_score"].between(args.level2_min_score,
                                                                               args.level2_max_score,
                                                                               inclusive="both")].copy()
 
-    # Dissolve Level 0–2 polygons into one large geometry, remove holes, buffer it,
-    # and use the mask to detect which "other_shelves" polygons are potentially
-    # indirectly attached or detached to the main land.
+    # Dissolve Level 0–2 polygons into one large geometry (our new interaction mask),
+    # remove holes, buffer it, and use the mask to detect which "other_shelves" polygons
+    # are potentially indirectly attached or detached to the main land.
     inter_mask_one = gpd.GeoDataFrame(
         pd.concat([
             Level_0_from_final_df,
@@ -285,20 +287,20 @@ def main():
     int_mask_fa['geometry'] = int_mask_fa['geometry'].apply(remove_holes)
 
     # We make a big buffer in the interaction mask in order to separate
-    # other ice shelf data
+    # the other ice shelves areas
     int_mask_fa['geometry'] = int_mask_fa.geometry.buffer(50)
 
     # Union mask into one geometry
     mask_union = int_mask_fa.geometry.union_all()
 
-    # Split other_shelves by intersection with the (buffered) mask
+    # Split "other_shelves" by intersection with the (buffered) mask
     other_shelves_in = other_shelves.loc[other_shelves.intersects(mask_union)].copy()
     other_shelves_out = other_shelves.loc[~other_shelves.intersects(mask_union)].copy()
 
-    # Repeat mask construction including shelves that intersected the first mask.
+    # Repeat mask construction but this time including shelves that intersected the first mask.
     # This two-step approach ensures that indirect attachment levels passing through
-    # multiple shelves are propagated
-    # Any Level 3 polygon intersecting this mask becomes Level 2 ("indirectly attached").
+    # multiple shelves are propagated to those ADD polygons
+    # Any Level 3 polygon intersecting this "new mask" becomes Level 2 ("indirectly attached").
     inter_mask_two = gpd.GeoDataFrame(
         pd.concat([
             Level_0_from_final_df,
@@ -311,8 +313,8 @@ def main():
     int_mask_fa = inter_mask_two.dissolve(by="mask")
     int_mask_fa['geometry'] = int_mask_fa['geometry'].apply(remove_holes)
 
-    # We make a big buffer in the interaction mask in order to separate
-    # other ice shelf data
+    # We make a big buffer in the new interaction mask in order to separate
+    # Level 3 polygons buffered by ice shelves which are truly detached
     int_mask_fa['geometry'] = int_mask_fa.geometry.buffer(50)
 
     # Union mask into one geometry
@@ -327,13 +329,14 @@ def main():
 
     other_ice_bodies_out = Level_3_buffered.loc[~Level_3_buffered.intersects(mask_union)].copy()
 
-    # Combine original Level_2 + added to Level_3_to_2.
+    # Combine original Level_2 + added from Level_3_to_2.
     Level_2_final = gpd.GeoDataFrame(
         pd.concat([Level_2_from_final_df, Level_3_to_2], ignore_index=True),
         crs=final_df.crs,
     )
 
-    # Combine original detached Level_3 + remaining (non-intersecting) Level_3 polygons.
+    # Combine original detached Level_3 + remaining Level_3 polygons wich are buttressed
+    # by ice shelves no originated from the main land and with zero connection to the mainland ice.
     Level_3_final = gpd.GeoDataFrame(
         pd.concat([Level_3_from_final_df, other_ice_bodies_out], ignore_index=True),
         crs=final_df.crs,
@@ -355,7 +358,7 @@ def main():
 
     # Add 'level' and 'level_text' to each group (0,1,2,3).
     # Then merge them back into the original final_df using apply_level(),
-    # which respects priority order and fills missing values only.
+    # which respects priority order.
     Level_0_from_final_df['level'] = int(0)
     Level_0_from_final_df['level_text'] = 'Attached'
 
@@ -376,14 +379,13 @@ def main():
 
     # Other ice shelves or ice sheet polygons in the interaction mask
     # will be dropped from the dataset since those where not in the original
-    # final_df
+    # final_df, the goal here is propagate levels to the original RGI and IRR datasets
     out = apply_level(out, Level_3_final, key=KEY)
     out = apply_level(out, Level_2_final, key=KEY)
     out = apply_level(out, Level_2_final, key=KEY)
     out = apply_level(out, Level_1_from_final_df, key=KEY)
     out = apply_level(out, Level_0_from_final_df, key=KEY)
 
-    # Optional: require that every row got assigned a level
     if out["level"].isna().any():
         missing = out.loc[out["level"].isna(), ].head(20).tolist()
         raise ValueError(f"Unassigned rows after merges. Example {KEY}s: {missing}")
@@ -393,8 +395,8 @@ def main():
 
     # Assigning levels to RGI data set
     # Some polygons reference the same RGI glacier ID.
-    # We explode rgi_ids into 1 row per glacier and then collapse back to one
-    # level per rgi_id using the policy: → keep the MIN level (most attached)
+    # We explode rgi_ids into 1 row per glacier and then collapse back to get one
+    # level per rgi_id polygon using the condition: → keep the MIN level (most attached)
     rgi_out = out.dropna(subset=['rgi_ids']).copy()
     rgi_out["rgi_ids"] = rgi_out["rgi_ids"].apply(ast.literal_eval)
 
@@ -408,7 +410,7 @@ def main():
     tmp = rgi_out_exploded.dropna(subset=["level"]).copy()
     tmp["level"] = pd.to_numeric(tmp["level"], errors="coerce").astype("Int64")
 
-    # Build a 1-row-per-rgi_id mapping using min level wins
+    # Build a 1-row-per-rgi_id mapping using min level as a condition
     # This is necessary for Alexander island only
     tmp["_has_text"] = tmp["level_text"].notna().astype(int)
 
@@ -459,12 +461,12 @@ def main():
     grouped.to_csv(out_stats_csv, index=False)
     print(f"Saved level stats to: {out_stats_csv}")
 
-    # total RGI area (your variable)
+    # total RGI area
     total_area = glacier_complex['area_km2'].sum()
-    # sum area for levels you will remove (0, 1, 2)
+    # sum area for levels, we remove (0, 1, 2)
     removed_area = grouped.loc[grouped['level'].isin([0, 1, 2]), 'total_area_km2'].sum()
 
-    # percent lost (guard against division by zero)
+    # percent lost
     if total_area == 0:
         pct_lost = 0.0
     else:
@@ -475,7 +477,6 @@ def main():
     print(f"Total RGI area = {total_area:.3f} km²")
     print(f"Percent area part of Ice Sheet = {pct_lost:.2f}%")
 
-    # ---- OPTIONAL: SAVE the scalar metrics too ----
     metrics = pd.DataFrame([{
         "removed_area_km2": removed_area,
         "total_rgi_area_km2": total_area,
@@ -485,20 +486,20 @@ def main():
     metrics.to_csv(out_metrics_csv, index=False)
     print(f"Saved metrics to: {out_metrics_csv}")
 
-    # Now we distribute levels accross the IRR dataset
+    # Now we distribute levels across the IRR dataset
     out_IRR = out.copy()
     out_IRR["id_icerise"] = out_IRR["id_icerise"].apply(ast.literal_eval)
     out_IRR["id_icerise"] = out_IRR["id_icerise"].apply(norm_icerise)
 
-    # Keep only valid rows (int OR non-empty list)
+    # Keep only valid rows
     out_IRR = out_IRR.dropna(subset=["id_icerise"]).copy()
 
-    # Explode list entries only; integers are untouched
+    # Explode list
     rise_out_exploded = (
         out_IRR.explode("id_icerise").reset_index(drop=True)
     )
 
-    # 4) Keep rows with assigned level
+    # Keep rows with assigned level
     tmp = rise_out_exploded.dropna(subset=["level"]).copy()
     tmp["level"] = pd.to_numeric(tmp["level"], errors="coerce").astype("Int64")
     tmp["_has_text"] = tmp["level_text"].notna().astype(int)
@@ -525,7 +526,6 @@ def main():
 
     outfile = Path(args.data_path) / "IRRv1_with_levels.gpkg"
     df_icerise.to_file(outfile, driver="GPKG")
-
 
 
 if __name__ == "__main__":
