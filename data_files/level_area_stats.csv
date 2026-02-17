@@ -1,0 +1,5 @@
+level,total_area_km2,n_rows,pct_of_total,level_definition
+2,69210.25854860652,62,51.869170899544045,"Level 2: detachment_score in [1.3, 1.9] and buttress_code 1 logic + indirect connection rule"
+0,30942.223883511935,147,23.189445210621134,"Level 0: detachment_score in [1.1, 1.1]"
+3,25541.19214519388,1388,19.14167766656648,Level 3: detachment_score==2 and buttress_code 0
+1,7738.684853778787,4,5.799706223268353,"Level 1: detachment_score in [1.2, 1.2]"
