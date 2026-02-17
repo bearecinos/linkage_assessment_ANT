@@ -110,13 +110,19 @@ def remove_holes(geom):
 
 
 def norm_icerise(x):
-    # empty list → None
+    """
+    Ice rises and rumples ids are sometimes
+    store as a list or an interger value
+    :param x: item from the df_final dataset
+    :return: if list is empty None, if list has
+    a value returns int or the int.
+    """
+    # empty list returns None
     if isinstance(x, list):
         return x if len(x) > 0 else None
-    # single integer → keep
+    # single integer returns keep
     if isinstance(x, int):
         return x
-    # ANYTHING ELSE → invalid → treat as None
     return None
 
 
