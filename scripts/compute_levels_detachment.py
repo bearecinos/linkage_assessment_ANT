@@ -70,13 +70,13 @@ def parse_arguments():
         required=True,
         help="Path to the ice rumples shapefile (.shp)"
     )
-    parser.add_argument("--level0_min_score", type=float, default=1.1)
-    parser.add_argument("--level0_max_score", type=float, default=1.1)
+    parser.add_argument("--level0_min_score", type=float, default=1.0)
+    parser.add_argument("--level0_max_score", type=float, default=1.0)
 
-    parser.add_argument("--level1_min_score", type=float, default=1.2)
-    parser.add_argument("--level1_max_score", type=float, default=1.2)
+    parser.add_argument("--level1_min_score", type=float, default=1.1)
+    parser.add_argument("--level1_max_score", type=float, default=1.6)
 
-    parser.add_argument("--level2_min_score", type=float, default=1.3)
+    parser.add_argument("--level2_min_score", type=float, default=1.7)
     parser.add_argument("--level2_max_score", type=float, default=1.9)
     return parser.parse_args()
 

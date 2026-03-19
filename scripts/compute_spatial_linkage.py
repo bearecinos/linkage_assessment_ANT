@@ -82,6 +82,10 @@ def bucket_overlap(ratio=float):
     # avoid cases with > 100 % due to buffer inaccuracies
     capped = min(ratio, 100.0)
 
+    # Change: 100% (and anything >100, which becomes capped==100) maps to 1.0
+    if capped >= 100.0:
+        return 1.0
+
     # Calculate to which bucket ratio the % belongs to
     # // 10 means integer division into bins of 10 (e.g., 85 → bin 8)
     # - 1e-9 prevents rounding errors like 10.0 being mistakenly placed in the next bin
@@ -136,11 +140,14 @@ def classify_polygon(row):
     # // 10 means integer division into bins of 10 (e.g., 85 → bin 8)
     # - 1e-9 prevents rounding errors like 10.0 being mistakenly placed in the next bin
     # + 1 shifts the range from 0-based to 1-based
-    bucket = int((min(ratio, 100.0) - 1e-9) // 10) + 1
-    bucket = min(bucket, 10)
-
-    # We probably need some message to translate the code above
-    label = f"Perimeter overlap {int((bucket-1)*10)}–{int(bucket*10)}%"
+    if ratio >= 100.0:
+        label = "Perimeter overlap 100%"
+    else:
+        # bins are [0–9], [10–19], ..., [90–99] (since <100 handled above)
+        bucket = int((ratio - 1e-9) // 10)  # 90–99 -> 9
+        lo = bucket * 10
+        hi = lo + 9
+        label = f"Perimeter overlap {lo}–{hi}%"
 
     return score, label, None, None
 
@@ -188,10 +195,7 @@ def main():
     combined['total_area'] = combined.geometry.area
     combined['perimeter'] = combined.geometry.length
 
-    # Spatial intersection with inter_mask
-    intersection_result = gpd.overlay(combined, interaction_mask, how='intersection')
-
-    # union of the interaction mask geometry
+    # # union of the interaction mask geometry
     mask_union = interaction_mask.union_all()
     # find which combined geometries intersect with the mask
     intersects_mask = combined.geometry.intersects(mask_union)
@@ -202,27 +206,15 @@ def main():
     print(no_intersection_combined.shape)
 
     # We save the shared perimeter for each geometry
-    intersection_result['perimeter_shared'] = intersection_result.geometry.length
+    # Shared perimeter = length of the assessment polygon boundary that overlaps the (buffered) mask
+    combined["perimeter_shared"] = combined.geometry.boundary.intersection(mask_union).length
 
-    # And the ratio
-    intersection_result['ratio'] = (intersection_result['perimeter_shared'] / intersection_result['perimeter']) * 100
+    # Ratio (% of polygon perimeter shared with mask)
+    combined["ratio"] = (combined["perimeter_shared"] / combined["perimeter"]) * 100
 
-    # Aggregate intersection results from the overlap per polygon
-    intersection_summary = (
-        intersection_result
-        .groupby("analysis_id", as_index=False)
-        .agg({
-            "perimeter_shared": "sum",
-            "ratio": "max"
-        })
-    )
-
-    # Build the combined final geopandas dataframe
-    combined_final = combined.merge(
-        intersection_summary,
-        on="analysis_id",
-        how="left"
-    )
+    combined_final = combined.copy()
+    assert "analysis_id" in combined_final.columns
+    assert "ratio" in combined_final.columns
 
     # We add classification fields that we will fill later
     combined_final["detachment_score"] = np.nan
@@ -251,8 +243,8 @@ def main():
     assert (detached_ratio.isna() | (detached_ratio <= 0)).all()
 
     # Overlapping polygons must be 1.x
-    assert combined_final.loc[combined_final.ratio.notna(),
-                             "detachment_score"].between(1.1, 1.9).all()
+    assert combined_final.loc[combined_final["ratio"] > 0,
+    "detachment_score"].between(1.0, 1.9).all()
 
     ##----------------- Next classification ------------------------------
     secondary_shelf_fp = Path(args.data_path) / "remaining_shelves_mask.gpkg"
