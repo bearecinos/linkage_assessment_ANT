@@ -22,19 +22,25 @@ that is shared with the primary interaction mask.
 - A detachment scoring is assigned from that perimeter-overlap percentage.
 - An additional buttressing context is derived from the secondary (island-origin) shelf mask.
 
-| Perimeter Overlap      | Score | Linkage Type            | Buttress Code | Buttress Source ID                        |
-|------------------------|-------|--------------------------|----------------|-----------------------------------------|
-| 90–100% (or >100%)     | 1.1   | Strong linkage           | None           | Buttressed by ice sheet/shelves (mainland) |
-| 80–90%                 | 1.2   |                          | None           | Buttressed by ice sheet/shelves (mainland) |
-| ...                    | ...   | ...                      | None           | Buttressed by ice sheet/shelves (mainland) |
-| 10–20%                 | 1.9   | Weak linkage             | None           | Buttressed by ice sheet/shelves (mainland) |
-| 0%                     | 2.0   | Completely detached       | 1.0           | Buttressed by non-mainland ice shelves  |
-| 0% + ≤10% shelf overlap| 2.0   | Completely detached       | 0.0           | Unclassified (not buttressed)           |
+| Perimeter Overlap (%)   | Detachment Score | Attachment Score | Description (attachment-oriented) | Buttress Code | Buttress Source ID               |
+| ----------------------- | ---------------: | ---------------: | --------------------------------- | ------------- | -------------------------------- |
+| 100%                    |              1.0 |              1.0 | Fully attached (ice sheet)        | None          | Buttressed by mainland ice       |
+| 90–99%                  |              1.1 |              0.9 | Strong attachment                 | None          | Buttressed by mainland ice       |
+| 80–90%                  |              1.2 |              0.8 | Strong attachment                 | None          | Buttressed by mainland ice       |
+| 70–80%                  |              1.3 |              0.7 | Moderate attachment               | None          | Buttressed by mainland ice       |
+| 60–70%                  |              1.4 |              0.6 | Moderate attachment               | None          | Buttressed by mainland ice       |
+| 50–60%                  |              1.5 |              0.5 | Moderate attachment               | None          | Buttressed by mainland ice       |
+| 40–50%                  |              1.6 |              0.4 | Moderate/weak attachment          | None          | Buttressed by mainland ice       |
+| 30–40%                  |              1.7 |              0.3 | Weak attachment                   | None          | Buttressed by mainland ice       |
+| 20–30%                  |              1.8 |              0.2 | Weak attachment                   | None          | Buttressed by mainland ice       |
+| 1–20%                   |              1.9 |              0.1 | Weak attachment                   | None          | Buttressed by mainland ice       |
+| 0% (no overlap)         |              2.0 |              0.0 | Fully detached                    | 1.0           | Buttressed by non-mainland shelf |
+| 0% + ≤10% shelf overlap |              2.0 |              0.0 | Fully detached                    | 0.0           | Unclassified (no buttress)       |
 
 Notes / conventions
 - Perimeter Overlap is computed as percentage of the assessment polygon’s perimeter
 that touches the primary interaction mask.
-- Score uses the decimal detachment scheme: 1.1 … 1.9 (progressively weaker linkage), 2.0 = fully detached.
+- Score uses the decimal detachment scheme: 1.0 … 1.9 (progressively weaker linkage), 2.0 = fully detached.
 - Buttress Code: 1.0 = buttressed by a non-mainland (island-origin) shelf; 0.0 = not buttressed / unclassified.
 
 Script done by B. Recinos (NERC IRF, U. Edinburgh)
@@ -291,6 +297,15 @@ def main():
     combined_final["buttress_source_id"] = combined_final["buttress_source_id"].fillna("unclassified")
 
     print(combined_final["detachment_score"].value_counts(dropna=False).sort_index())
+
+    # --- Output remap: detachment -> attachment (no upstream logic changes) ---
+    combined_final["attachment_score"] = (2.0 - combined_final["detachment_score"]).round(2)
+    assert combined_final["attachment_score"].dropna().between(0.0, 1.0).all()
+
+    cols = combined_final.columns.tolist()
+    # move attachment_score right after detachment_score
+    cols.insert(cols.index("detachment_score") + 1, cols.pop(cols.index("attachment_score")))
+    combined_final = combined_final[cols]
 
     filename = Path(args.data_path) / f"final_classification_buckets.gpkg"
     combined_final.to_file(filename, driver="GPKG")

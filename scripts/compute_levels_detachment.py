@@ -1,36 +1,26 @@
 """
 This script assigns detachment / attachment levels (0–3) to all Antarctic coastal
 and glacier polygons. The workflow integrates ADD coastline data, RGI glacier
-complex dataset, the ice rises and rumples datset and additional ice-shelf masks that
+complex dataset, the ice rises and rumples dataset and additional ice-shelf masks that
 help with the final scoring.
 
-It produces three .gpkg files and some stats:
+Outputs:
 1. final_classification_buckets_w_levels.gpkg
-   The original final_df dataset but with Level 0–3 detachment labels assigned.
-2. RGIv7GC_with_levels.gpkg
-   One geometry per RGI glacier ID, with the level classification among all polygons
-   referencing that RGIID (we pick always the min level when an island complex has multiple
-   levels of detachment, important for mapping the levels to RGI entities in areas such as
-   Alexander Island).
+2. RGI-GCv7_with_levels.gpkg
 3. IRRv1_with_levels.gpkg
-   One geometry per Ice rise and rumple dataset ID, Level 0 is force only on
-   Law Dome as the ADD and the IRRv1 dataset are not compatible in that particular
-   polygon / area.
-4. Stats of area distribution per level
+4. Stats CSVs: level_area_stats.csv, level_area_metrics.csv
 
-Overview of detachment levels:
-- Level 0: Ice sheet, Ice shelves, Ice tongue and
-    Ice rumples with ≥90% perimeter overlap with Level 0.
-    Though only those polygons in `ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg` are classified.
-- Level 1: Strong attachment: Glaciated islands and
-    Ice rises partially embedded in the shelf (≥80% perimeter overlap with Level 0)
-- Level 2: Weak attachment: Glaciated islands,
-    Ice rises, Ice ridges or Nunataks with partial direct connection to Level 0
-    (1–79% perimeter overlap) or indirect connection via shared perimeters with Levels 0–2.
-- Level 3: Detached
+Reversed level convention:
+- Level 0: Fully detached (0% perimeter overlap), detachment_score == 2.0
+- Level 1: Weak attachment, detachment_score in [1.7, 1.9]
+- Level 2: Strong attachment, detachment_score in [1.1, 1.6]
+- Level 3: Attached / part of ice sheet, detachment_score in [1.0, 1.0]
 
-The min detachment score for level 0 is always 1.1 and Leve 3 will always be defined
-by a detachment score of 2.0. Is the upper bound of level 0 to 2 which will vary.
+Notes:
+- The indirect-connection logic (buffered shelves) is preserved: some polygons with
+  detachment_score==2 and buttress_code==1 may be reclassified from Level 0 to Level 1.
+- Per-RGI-ID and per-ice-rise aggregation keeps the MOST ATTACHED state, which is MAX(level)
+  under this reversed convention.
 """
 import sys
 import os
@@ -44,7 +34,7 @@ import ast
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Parse geopackage and data paths for geospatial processing."
+        description="Assign reversed attachment/detachment levels (0–3) to Antarctic polygons."
     )
     parser.add_argument(
         "--data_path",
@@ -70,14 +60,17 @@ def parse_arguments():
         required=True,
         help="Path to the ice rumples shapefile (.shp)"
     )
-    parser.add_argument("--level0_min_score", type=float, default=1.0)
-    parser.add_argument("--level0_max_score", type=float, default=1.0)
+    parser.add_argument("--level3_min_score", type=float, default=1.0, help="Level 3 (attached) min detachment_score")
+    parser.add_argument("--level3_max_score", type=float, default=1.0, help="Level 3 (attached) max detachment_score")
 
-    parser.add_argument("--level1_min_score", type=float, default=1.1)
-    parser.add_argument("--level1_max_score", type=float, default=1.6)
+    parser.add_argument("--level2_min_score", type=float, default=1.1, help="Level 2 (strong attachment) min detachment_score")
+    parser.add_argument("--level2_max_score", type=float, default=1.6, help="Level 2 (strong attachment) max detachment_score")
 
-    parser.add_argument("--level2_min_score", type=float, default=1.7)
-    parser.add_argument("--level2_max_score", type=float, default=1.9)
+    parser.add_argument("--level1_min_score", type=float, default=1.7, help="Level 1 (weak attachment) min detachment_score")
+    parser.add_argument("--level1_max_score", type=float, default=1.9, help="Level 1 (weak attachment) max detachment_score")
+
+    parser.add_argument("--level0_score", type=float, default=2.0, help="Level 0 (fully detached) exact detachment_score")
+
     return parser.parse_args()
 
 
@@ -128,15 +121,11 @@ def norm_icerise(x):
 
 def apply_level(out_df, level_df, key="analysis_id"):
     """
-    Assign the final level of attachment / detachment
-    - **Level 0** - Ice sheet, Ice shelves, Ice tongue and Ice rumples with
-    ≥90% perimeter overlap with Level 0.
-    - **Level 1** - Strong attachment: Glaciated islands and Ice rises partially
-     embedded in the shelf (≥80% perimeter overlap with Level 0)
-    - **Level 2** - Weak attachment: Glaciated islands, Ice rises,
-        Ice ridges or Nunataks with partial direct connection to Level 0
-        (1–79% perimeter overlap) or indirect connection via shared perimeters with Levels 0–2.
-    - **Level 3** - Detached
+    Assign the final level of attachment
+    - **Level 0** - Fully detached island 0% perimeter overlap score -> 2.0
+    - **Level 1** - Weak attachment: 39-1% perimeter overlap scores -> 1.9 - 1.7 if chosen default
+    - **Level 2** - Strong attachment: 40-99% perimeter overlap scores -> 1.6 - 1.1 if chosen default
+    - **Level 3** - Attached: 100% perimeter overlap scores -> 1.0
     :param out_df: same file as final_classification_buckets.gpkg but with levels of detachment
     :param level_df: the final grouping for each level
     :param key: column name
@@ -147,6 +136,18 @@ def apply_level(out_df, level_df, key="analysis_id"):
     tmp["level"] = tmp["level"].combine_first(tmp["level__new"])
     tmp["level_text"] = tmp["level_text"].combine_first(tmp["level_text__new"])
     return tmp.drop(columns=["level__new", "level_text__new"])
+
+
+def _att_range(dmin: float, dmax: float):
+    """
+    Define attachment range scores given detachment range scores
+    :param dmin:
+    :param dmax:
+    :return:
+    """
+    amin = round(2.0 - dmax, 2)
+    amax = round(2.0 - dmin, 2)
+    return f"attachment_score in [{amin}, {amax}]"
 
 
 def main():
@@ -210,7 +211,7 @@ def main():
 
     only_icesheet['surface'] = 'Ice sheet'
 
-    # Combine in a mask the first version of Level 0
+    # Combine in a mask the first version of Level 3
     combined_gdf = gpd.GeoDataFrame(
         pd.concat([only_icesheet, ice_shelf_gdf, ice_tongue_gdf, ice_rumple_gdf],
                   ignore_index=True),
@@ -223,7 +224,7 @@ def main():
 
     # Use the 'remaining_shelves_mask' dataset to erase shelves that are not
     # physically connected to the main land. This produces a cleaned mask
-    # for the initial Level 0 dataset.
+    # for the initial Level 3 dataset.
     combined_erased = gpd.overlay(combined_gdf,
                                   mask,
                                   how="difference",
@@ -239,9 +240,10 @@ def main():
         analysis_id=None,
         perimeter_shared=None,
         ratio=100,
-        detachment_score=0,
-        detachment_desc="Perimeter overlap 90–100%",
-        buttress_code=0,
+        detachment_score=1.0,
+        attachment_score=1.0,
+        detachment_desc="Perimeter overlap 100%",
+        buttress_code=None,
         buttress_source_id="Buttressed by mainland ice",
     )
 
@@ -249,52 +251,50 @@ def main():
     combined_erased["perimeter"] = combined_erased.geometry.length
 
     # Make sure final_df also has a surface column so we can combined
-    # ice bodies classified as Level 0 with the main Level 0 mask
+    # ice bodies classified as Level 3 with the main Level 3 mask
     final_df['surface'] = None
 
-    # Partition polygons from final_df into Level 0–3
+    # Partition polygons from final_df into Level 3 and 0
     # using detachment_score and buttress_code.
     # These groups come straight from perimeter overlap metrics prior to
-    # from running this code. We start with the easy group Level 0 and 3.
-    Level_0 = final_df.loc[final_df["detachment_score"].between(args.level0_min_score,
-                                                                args.level0_max_score,
+    # from running this code. We start with the easy group Level 3 and 0.
+    Level_3 = final_df.loc[final_df["detachment_score"].between(args.level3_min_score,
+                                                                args.level3_max_score,
                                                                 inclusive="both")].copy()
+    Level_3_from_final_df = pd.concat([Level_3, combined_erased], ignore_index=True)
 
-    Level_0_from_final_df = pd.concat([Level_0, combined_erased], ignore_index=True)
-
-    # Now lets pick those completely detached and buttressed by ice from the mainland
-    Level_3_from_final_df = final_df.loc[final_df["detachment_score"].eq(2)
+    # Now lets pick those completly detached and buttressed by ice from the mainland: detachment_score == 2.0
+    Level_0_from_final_df = final_df.loc[final_df["detachment_score"].eq(args.level0_score)
                                          & final_df["buttress_code"].eq(0)].copy()
 
-    # Now everything with a perimeter overlap between level1_min_score and level1_max_score
-    Level_1_from_final_df = final_df.loc[final_df["detachment_score"].between(args.level1_min_score,
-                                                                              args.level1_max_score,
-                                                                              inclusive="both")].copy()
-
     # Now everything with a perimeter overlap between level2_min_score and level2_max_score
-    # We will still need to add anything in Level 3 that has an indirect connection with 0-2.
-    # After doing another interaction mask analysis
     Level_2_from_final_df = final_df.loc[final_df["detachment_score"].between(args.level2_min_score,
                                                                               args.level2_max_score,
                                                                               inclusive="both")].copy()
 
-    # Dissolve Level 0–2 polygons into one large geometry (our new interaction mask),
-    # remove holes, buffer it, and use the mask to detect which "other_shelves" polygons
-    # are potentially indirectly attached or detached to the main land.
+    # Now everything with a perimeter overlap between level1_min_score and level1_max_score (weak attachment)
+    # We will still need to add anything in Level 0 (fully detached candidates)
+    # that has an indirect connection via intersection with the buffered mask built from Levels 1–3.
+    # After doing another interaction mask analysis, those Level 0 polygons become Level 1.
+    Level_1_from_final_df = final_df.loc[final_df["detachment_score"].between(args.level1_min_score,
+                                                                              args.level1_max_score,
+                                                                              inclusive="both")].copy()
+
+    # Interaction mask uses "attached-ish" classes (Levels 1–3) to reclassify buffered detached polygons.
     inter_mask_one = gpd.GeoDataFrame(
         pd.concat([
-            Level_0_from_final_df,
-            Level_1_from_final_df,
-            Level_2_from_final_df
+            Level_3_from_final_df,
+            Level_2_from_final_df,
+            Level_1_from_final_df
         ], ignore_index=True), crs=only_icesheet.crs)
 
-    inter_mask_one["mask"] = 1  # Dummy column for dissolve
+    inter_mask_one["mask"] = 1 # Dummy column for dissolve
     int_mask_fa = inter_mask_one.dissolve(by="mask")
-    int_mask_fa['geometry'] = int_mask_fa['geometry'].apply(remove_holes)
+    int_mask_fa["geometry"] = int_mask_fa["geometry"].apply(remove_holes)
 
     # We make a big buffer in the interaction mask in order to separate
     # the other ice shelves areas
-    int_mask_fa['geometry'] = int_mask_fa.geometry.buffer(50)
+    int_mask_fa["geometry"] = int_mask_fa.geometry.buffer(50)
 
     # Union mask into one geometry
     mask_union = int_mask_fa.geometry.union_all()
@@ -306,76 +306,75 @@ def main():
     # Repeat mask construction but this time including shelves that intersected the first mask.
     # This two-step approach ensures that indirect attachment levels passing through
     # multiple shelves are propagated to those ADD polygons
-    # Any Level 3 polygon intersecting this "new mask" becomes Level 2 ("indirectly attached").
+    # Any Level 0 polygon intersecting this "new mask" becomes Level 1 ("indirectly attached").
     inter_mask_two = gpd.GeoDataFrame(
         pd.concat([
-            Level_0_from_final_df,
-            Level_1_from_final_df,
+            Level_3_from_final_df,
             Level_2_from_final_df,
+            Level_1_from_final_df,
             other_shelves_in
         ], ignore_index=True), crs=only_icesheet.crs)
 
-    inter_mask_two["mask"] = 1  # Dummy column for dissolve
+    inter_mask_two["mask"] = 1 # Dummy column for dissolve
     int_mask_fa = inter_mask_two.dissolve(by="mask")
-    int_mask_fa['geometry'] = int_mask_fa['geometry'].apply(remove_holes)
+    int_mask_fa["geometry"] = int_mask_fa["geometry"].apply(remove_holes)
 
     # We make a big buffer in the new interaction mask in order to separate
-    # Level 3 polygons buffered by ice shelves which are truly detached
-    int_mask_fa['geometry'] = int_mask_fa.geometry.buffer(50)
+    # Level 0 polygons buffered by ice shelves which are truly detached
+    int_mask_fa["geometry"] = int_mask_fa.geometry.buffer(50)
 
     # Union mask into one geometry
     mask_union = int_mask_fa.geometry.union_all()
 
-    Level_3_buffered = final_df.loc[final_df["detachment_score"].eq(2)
+    Level_0_buffered = final_df.loc[final_df["detachment_score"].eq(args.level0_score)
                                     & final_df["buttress_code"].eq(1)].copy()
 
-    # Identify Level 3 polygons buffered by the interaction mask.
-    # These polygons are indirectly connected through shelves → reclassified as Level 2.
-    Level_3_to_2 = Level_3_buffered.loc[Level_3_buffered.intersects(mask_union)].copy()
+    # Identify Level 0 polygons buffered by the interaction mask.
+    # These polygons are indirectly connected through shelves → reclassified as Level 1.
+    Level_0_to_1 = Level_0_buffered.loc[Level_0_buffered.intersects(mask_union)].copy()
 
-    other_ice_bodies_out = Level_3_buffered.loc[~Level_3_buffered.intersects(mask_union)].copy()
+    other_ice_bodies_out = Level_0_buffered.loc[~Level_0_buffered.intersects(mask_union)].copy()
 
-    # Combine original Level_2 + added from Level_3_to_2.
-    Level_2_final = gpd.GeoDataFrame(
-        pd.concat([Level_2_from_final_df, Level_3_to_2], ignore_index=True),
+    # Finalize Level 1: direct weak attachment + indirect (from detached buffered)
+    Level_1_final = gpd.GeoDataFrame(
+        pd.concat([Level_1_from_final_df, Level_0_to_1], ignore_index=True),
         crs=final_df.crs,
     )
 
-    # Combine original detached Level_3 + remaining Level_3 polygons wich are buttressed
-    # by ice shelves no originated from the main land and with zero connection to the mainland ice.
-    Level_3_final = gpd.GeoDataFrame(
-        pd.concat([Level_3_from_final_df, other_ice_bodies_out], ignore_index=True),
+    # Finalize Level 0: fully detached (buttress_code 0) + buffered-but-still-detached
+    Level_0_final = gpd.GeoDataFrame(
+        pd.concat([Level_0_from_final_df, other_ice_bodies_out], ignore_index=True),
         crs=final_df.crs,
     )
 
     assert (
-            len(Level_0)
-            + len(Level_3_final)
-            + len(Level_2_final)
-            + len(Level_1_from_final_df)
-            == len(final_df)
+        len(Level_3)
+        + len(Level_2_from_final_df)
+        + len(Level_1_final)
+        + len(Level_0_final)
+        == len(final_df)
     ), (
-        f"Count mismatch: sum(levels)={len(Level_0) + 
-                                       len(Level_3_final) + 
-                                       len(Level_2_final) + 
-                                       len(Level_1_from_final_df)} "
+        f"Count mismatch: sum(levels)={len(Level_3) + 
+                                       len(Level_2_from_final_df) + 
+                                       len(Level_1_final) + 
+                                       len(Level_0_final)} "
         f"!= len(final_df)={len(final_df)}"
     )
 
     # Add 'level' and 'level_text' to each group (0,1,2,3).
     # Then merge them back into the original final_df using apply_level(),
     # which respects priority order.
-    Level_0_from_final_df['level'] = int(0)
-    Level_0_from_final_df['level_text'] = 'Attached'
+    Level_0_final["level"] = int(0)
+    Level_0_final["level_text"] = "Fully detached"
 
-    Level_1_from_final_df['level'] = int(1)
-    Level_1_from_final_df['level_text'] = 'Strong attachment'
+    Level_1_final["level"] = int(1)
+    Level_1_final["level_text"] = "Weak attachment"
 
-    Level_2_final['level'] = int(2)
-    Level_2_final['level_text'] = 'Weak direct/indirect attachment'
+    Level_2_from_final_df["level"] = int(2)
+    Level_2_from_final_df["level_text"] = "Strong attachment"
 
-    Level_3_final['level'] = int(3)
-    Level_3_final['level_text'] = 'No attachment'
+    Level_3_from_final_df["level"] = int(3)
+    Level_3_from_final_df["level_text"] = "Attached (ice sheet)"
 
     out = final_df.copy()
     out["level"] = None
@@ -386,24 +385,23 @@ def main():
     # Other ice shelves or ice sheet polygons in the interaction mask
     # will be dropped from the dataset since those where not in the original
     # final_df, the goal here is propagate levels to the original RGI and IRR datasets
-    out = apply_level(out, Level_3_final, key=KEY)
-    out = apply_level(out, Level_2_final, key=KEY)
-    out = apply_level(out, Level_2_final, key=KEY)
-    out = apply_level(out, Level_1_from_final_df, key=KEY)
-    out = apply_level(out, Level_0_from_final_df, key=KEY)
+    out = apply_level(out, Level_0_final, key=KEY)
+    out = apply_level(out, Level_1_final, key=KEY)
+    out = apply_level(out, Level_2_from_final_df, key=KEY)
+    out = apply_level(out, Level_3_from_final_df, key=KEY)
 
     if out["level"].isna().any():
-        missing = out.loc[out["level"].isna(), ].head(20).tolist()
+        missing = out.loc[out["level"].isna(), KEY].head(20).tolist()
         raise ValueError(f"Unassigned rows after merges. Example {KEY}s: {missing}")
 
-    filename = Path(args.data_path) / f"final_classification_buckets_w_levels.gpkg"
+    filename = Path(args.data_path) / "final_classification_buckets_w_levels.gpkg"
     out.to_file(filename, driver="GPKG")
 
     # Assigning levels to RGI data set
     # Some polygons reference the same RGI glacier ID.
     # We explode rgi_ids into 1 row per glacier and then collapse back to get one
-    # level per rgi_id polygon using the condition: → keep the MIN level (most attached)
-    rgi_out = out.dropna(subset=['rgi_ids']).copy()
+    # level per rgi_id polygon using the condition: → keep the MAX level (most attached)
+    rgi_out = out.dropna(subset=["rgi_ids"]).copy()
     rgi_out["rgi_ids"] = rgi_out["rgi_ids"].apply(ast.literal_eval)
 
     rgi_out_exploded = (
@@ -412,17 +410,17 @@ def main():
         .reset_index(drop=True)
     )
 
-    # We explode the previous dataset again to keep one level per rgiid
     tmp = rgi_out_exploded.dropna(subset=["level"]).copy()
     tmp["level"] = pd.to_numeric(tmp["level"], errors="coerce").astype("Int64")
 
-    # Build a 1-row-per-rgi_id mapping using min level as a condition
+    # Build a 1-row-per-rgi_id mapping using max level as a condition
     # This is necessary for Alexander island only
     tmp["_has_text"] = tmp["level_text"].notna().astype(int)
 
+    # MAX level = most attached
     rgi_level_map = (
-        tmp.sort_values(["rgi_id", "level", "_has_text"], ascending=[True, True, False])
-        .drop_duplicates(subset=["rgi_id"], keep="first")[["rgi_id", "level", "level_text"]]
+        tmp.sort_values(["rgi_id", "level", "attachment_score", "_has_text"], ascending=[True, False, False, False])
+        .drop_duplicates(subset=["rgi_id"], keep="first")[["rgi_id", "level", "level_text", "attachment_score"]]
         .reset_index(drop=True)
     )
 
@@ -431,7 +429,7 @@ def main():
     df_rgi = gc.merge(rgi_level_map, on="rgi_id", how="inner", validate="1:1")
 
 
-    filename = Path(args.data_path) / f"RGI-GCv7_with_levels.gpkg"
+    filename = Path(args.data_path) / "RGI-GCv7_with_levels.gpkg"
     df_rgi.to_file(filename, driver="GPKG")
 
     # Print some stats
@@ -452,25 +450,25 @@ def main():
     grouped = grouped.sort_values("total_area_km2", ascending=False).reset_index(drop=True)
 
     level_defs = {
-        0: f"Level 0: detachment_score in [{args.level0_min_score}, {args.level0_max_score}]",
-        1: f"Level 1: detachment_score in [{args.level1_min_score}, {args.level1_max_score}]",
-        2: f"Level 2: detachment_score in [{args.level2_min_score}, {args.level2_max_score}] and "
-           f"buttress_code 1 logic + indirect connection rule",
-        3: "Level 3: detachment_score==2 and buttress_code 0",
+        3: f"Level 3 (attached): {_att_range(args.level3_min_score, args.level3_max_score)}",
+        2: f"Level 2 (strong attachment): {_att_range(args.level2_min_score, args.level2_max_score)}",
+        1: f"Level 1 (weak attachment): {_att_range(args.level1_min_score, args.level1_max_score)} "
+           f"+ indirect connection rule",
+        0: f"Level 0 (fully detached): attachment_score=={round(2.0 - args.level0_score, 2)} with buttress_code 0",
     }
 
     grouped["level_definition"] = grouped["level"].map(level_defs).fillna("")
 
     print(grouped)
 
-    out_stats_csv = args.data_path / "level_area_stats.csv"  # or any path you want
+    out_stats_csv = args.data_path / "level_area_stats.csv"
     grouped.to_csv(out_stats_csv, index=False)
     print(f"Saved level stats to: {out_stats_csv}")
 
     # total RGI area
-    total_area = glacier_complex['area_km2'].sum()
-    # sum area for levels, we remove (0, 1, 2)
-    removed_area = grouped.loc[grouped['level'].isin([0, 1, 2]), 'total_area_km2'].sum()
+    total_area = glacier_complex["area_km2"].sum()
+    # sum area for levels, we remove (1, 2, 3)
+    removed_area = grouped.loc[grouped["level"].isin([1, 2, 3]), "total_area_km2"].sum()
 
     # percent lost
     if total_area == 0:
@@ -492,7 +490,7 @@ def main():
     metrics.to_csv(out_metrics_csv, index=False)
     print(f"Saved metrics to: {out_metrics_csv}")
 
-    # Now we distribute levels across the IRR dataset
+    # --- Distribute levels across IRR dataset (keep MOST attached => MAX(level)) ---
     out_IRR = out.copy()
     out_IRR["id_icerise"] = out_IRR["id_icerise"].apply(ast.literal_eval)
     out_IRR["id_icerise"] = out_IRR["id_icerise"].apply(norm_icerise)
@@ -511,10 +509,10 @@ def main():
     tmp["_has_text"] = tmp["level_text"].notna().astype(int)
 
     icerise_level_map = (
-        tmp.sort_values(["id_icerise", "level", "_has_text"],
-                        ascending=[True, True, False])
+        tmp.sort_values(["id_icerise", "level", "attachment_score",  "_has_text"],
+                        ascending=[True, False, False, False])
         .drop_duplicates(subset=["id_icerise"], keep="first")
-        [["id_icerise", "level", "level_text"]]
+        [["id_icerise", "level", "level_text", "attachment_score"]]
         .reset_index(drop=True)
     )
 
@@ -525,10 +523,10 @@ def main():
         validate="1:1"
     )
 
-    # For Law Dome this needs to be force due to issues with
-    # non compatibility of ADD and the IRR data set
-    df_icerise.loc[df_icerise["id_icerise"] == 174, "level"] = 0
-    df_icerise.loc[df_icerise["id_icerise"] == 174, "level_text"] = "Attached"
+    # Law Dome forced to ATTACHED (Level 3) under reversed convention
+    df_icerise.loc[df_icerise["id_icerise"] == 174, "level"] = 3
+    df_icerise.loc[df_icerise["id_icerise"] == 174, "level_text"] = "Attached (ice sheet)"
+    df_icerise.loc[df_icerise["id_icerise"] == 174, "attachment_score"] = 1.0
 
     outfile = Path(args.data_path) / "IRRv1_with_levels.gpkg"
     df_icerise.to_file(outfile, driver="GPKG")
@@ -536,7 +534,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
