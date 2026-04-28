@@ -1,5 +1,5 @@
 level,total_area_km2,n_rows,pct_of_total,level_definition
-1,69210.25854860652,62,51.86917089954403,"Level 1 (weak attachment): attachment_score in [0.1, 0.3] + indirect connection rule"
-2,30549.111939017246,57,22.894830061664173,"Level 2 (strong attachment): attachment_score in [0.4, 0.9]"
-0,25541.19214519388,1388,19.141677666566476,Level 0 (fully detached): attachment_score==0.0 with buttress_code 0
-3,8131.796798273475,94,6.094321372225306,"Level 3 (attached): attachment_score in [1.0, 1.0]"
+1,77373.07360237952,69,57.986738698372136,"Level 1 (weak attachment): attachment_score in [0.1, 0.4] + indirect connection rule"
+0,25541.19214519388,1388,19.14167766656648,Level 0 (fully detached): attachment_score==0.0 with buttress_code 0
+2,22386.296885244235,50,16.77726226283607,"Level 2 (strong attachment): attachment_score in [0.5, 0.9]"
+3,8131.796798273475,94,6.0943213722253065,"Level 3 (attached): attachment_score in [1.0, 1.0]"

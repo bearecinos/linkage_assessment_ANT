@@ -64,9 +64,9 @@ def parse_arguments():
     parser.add_argument("--level3_max_score", type=float, default=1.0, help="Level 3 (attached) max detachment_score")
 
     parser.add_argument("--level2_min_score", type=float, default=1.1, help="Level 2 (strong attachment) min detachment_score")
-    parser.add_argument("--level2_max_score", type=float, default=1.6, help="Level 2 (strong attachment) max detachment_score")
+    parser.add_argument("--level2_max_score", type=float, default=1.5, help="Level 2 (strong attachment) max detachment_score")
 
-    parser.add_argument("--level1_min_score", type=float, default=1.7, help="Level 1 (weak attachment) min detachment_score")
+    parser.add_argument("--level1_min_score", type=float, default=1.6, help="Level 1 (weak attachment) min detachment_score")
     parser.add_argument("--level1_max_score", type=float, default=1.9, help="Level 1 (weak attachment) max detachment_score")
 
     parser.add_argument("--level0_score", type=float, default=2.0, help="Level 0 (fully detached) exact detachment_score")
