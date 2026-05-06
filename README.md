@@ -208,7 +208,7 @@ python compute_level_detachment.py \
   --coast_file path/to/add_coastline.shp \
   --glacier_complex path/to/rgi_glacier_complexes.shp \
   --ice_rumples path/to/ice_rumples.shp
-
+```
 
 Contributors of data, guidance or code
 ------------
