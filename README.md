@@ -1,11 +1,12 @@
-## Spatial linkage assessment for Glacier Complexes (Antarctic Region, RGIv7)
+## Attachment levels of Antarctic and Sub-Antarctic ice bodies from the Ice Sheet: a perimeter-overlap classification
 
-This project performs a spatial analysis to determine the degree of spatial connectivity or "detachment" between glacier complexes and surrounding Antarctic ice types—namely the ice sheet, ice shelves and ice tongues. The linkage classification is also done on Ice rises and rumples.
+This project performs a spatial analysis to determine the degree of spatial connectivity or "attachment" between glacier complexes and surrounding Antarctic ice types—namely the ice sheet, ice shelves and ice tongues. The linkage classification is also done on Ice rises and rumples.
 
 The workflow consists of two scripts:
 
 - `preprocess_ice_types_masks.py`: generates core geospatial masks for analysis.
-- `compute_spatial_linkage.py`: computes connectivity ("detachment") scores between each polygon and surrounding ice using shared perimeter logic.
+- `compute_spatial_linkage.py`: computes connectivity (attachment and detachment scores) between each polygon and surrounding ice (ice sheet and ice shelves) using shared perimeter logic.
+- `compute_levels_detachment.py`: quantifies how attached peripheral Antarctic coastal polygons are to the ice-sheet and ice-shelf interaction mask by grouping high-resolution attachment scores into attachment levels 0–3 using community-derived thresholds; the script also supports sensitivity studies to test how different threshold groupings affect polygon classification.
 
 ### Dependencies
 
@@ -88,7 +89,7 @@ For each polygon, the script computes:
 - Total perimeter  
 - Shared perimeter with the interaction mask (buffered)  
 
-The percentage overlap is converted into a **detachment and attachment scores**:
+The percentage overlap is converted into **attachment scores**, while an equivalent **detachment scale** is also computed to provide an alternative framing of the same relationship.:
 
 - **Classification scheme (to be discussed)**
 
@@ -113,10 +114,10 @@ Notes / conventions
 - Perimeter Overlap is computed as percentage of the assessment polygon’s perimeter that touches the primary interaction mask.
 - Score uses the decimal detachment scheme: 1.0 … 1.9 (progressively weaker linkage), 2.0 = fully detached.
 - Buttress Code: 1.0 = buttressed by a non-mainland (island-origin) shelf; 0.0 = not buttressed / unclassified.
-- An attachment score is introduced to convert categories into connectivity levels comparable to Greenland.
+- An attachment score is introduced to convert categories into connectivity levels comparable to Greenland. **Computed to provide an alternative framing of the same relationship.**
 
 Outputs:
-- `final_classification_buckets.gpkg`: GeoPackage with one row per polygon, including its `detachment_score` and `detachment_description` and original RGI-ids or IRR-ids.
+- `final_classification_buckets.gpkg`: GeoPackage with one row per polygon, including its `attachment_score`, a `descriptor` and original RGI-ids or IRR-ids.
 
 #### Usage
 ```bash
