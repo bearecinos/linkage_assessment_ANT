@@ -292,12 +292,16 @@ def main():
         chunksize=1
     )
 
-    fname_ADD = application_mask.stem + '_ADD_coverage.gpkg'
-    fpath_ADD = data_dir / fname_ADD
-    fname_RGI = application_mask.stem + '_RGI_coverage.gpkg'
-    fpath_RGI = data_dir / fname_RGI
-    fname_IRR = application_mask.stem + '_IRR_coverage.gpkg'
-    fpath_IRR = data_dir / fname_IRR
+    output_dir = application_mask.parent
+
+    fname_ADD = application_mask.stem + "_ADD_coverage.gpkg"
+    fpath_ADD = output_dir / fname_ADD
+
+    fname_RGI = application_mask.stem + "_RGI_coverage.gpkg"
+    fpath_RGI = output_dir / fname_RGI
+
+    fname_IRR = application_mask.stem + "_IRR_coverage.gpkg"
+    fpath_IRR = output_dir / fname_IRR
 
     add_polygons_with_coverage.to_file(fpath_ADD, driver="GPKG")
     RGI_polygons_with_coverage.to_file(fpath_RGI, driver="GPKG")
