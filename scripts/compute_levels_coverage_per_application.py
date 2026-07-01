@@ -1,5 +1,26 @@
 """
-This script ....
+Compute per-polygon coverage of a boolean raster mask for multiple polygon datasets.
+
+This script reads an application mask raster where cells with value 1 indicate
+that data exist, then computes for each polygon the fraction of its true vector
+area covered by valid raster cells. The calculation is done separately for three
+polygon databases (ADD, RGI, and IRR), while preserving all original polygon
+attributes and appending new coverage metrics.
+
+For each polygon, the workflow:
+1. Reads only the raster window around the polygon bounds.
+2. Keeps only raster cells where the mask equals 1.
+3. Converts those valid raster cells into grid-cell polygons.
+4. Intersects them with the input polygon geometry.
+5. Sums the overlap area.
+6. Computes the percentage of polygon area covered by valid raster cells.
+
+The script parallelizes the polygon processing with multiprocessing and writes
+one output GeoPackage per input polygon dataset.
+
+Script done by B. Recinos (NERC IRF, U. Edinburgh)
+Portions of this code were generated or optimized using
+Microsoft Copilot
 """
 
 from __future__ import annotations
@@ -8,7 +29,6 @@ import os
 import sys
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Sequence
 import argparse
 
 import geopandas as gpd
@@ -279,9 +299,12 @@ def main():
     fname_IRR = application_mask.stem + '_IRR_coverage.gpkg'
     fpath_IRR = data_dir / fname_IRR
 
-    add_polygons_with_coverage.to_file(fpath_ADD)
-    RGI_polygons_with_coverage.to_file(fpath_RGI)
-    IRR_polygons_with_coverage.to_file(fpath_IRR)
+    add_polygons_with_coverage.to_file(fpath_ADD, driver="GPKG")
+    RGI_polygons_with_coverage.to_file(fpath_RGI, driver="GPKG")
+    IRR_polygons_with_coverage.to_file(fpath_IRR, driver="GPKG")
 
     print(f"All saved")
     print("Done!")
+
+if __name__ == "__main__":
+    main()
