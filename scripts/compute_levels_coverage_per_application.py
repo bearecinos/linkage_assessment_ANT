@@ -538,7 +538,7 @@ def main():
     data_dir = Path(args.data_path)
     application_mask = Path(args.application_mask)
     add_polygons = data_dir / "final_classification_buckets_w_levels.gpkg"
-    rgi_polygons = data_dir / "RGI-GCv7_with_levels.gpkg"
+    rgi_polygons = data_dir / "RGI2000-v7.0-G-19_subantarctic_antarctic_islands_with_levels.gpkg"
     irr_polygons = data_dir / "IRRv1_with_levels.gpkg"
 
     add_polygons_with_coverage = attach_valid_coverage_to_polygons_parallel_pool(

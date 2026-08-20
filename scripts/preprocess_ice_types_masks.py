@@ -214,8 +214,11 @@ def main():
     )
 
     # 2. Dissolve all into one single polygon (mask)
-    combined_gdf["mask"] = 1  # Dummy column for dissolve
-    interaction_mask = combined_gdf.dissolve(by="mask")
+    mask_gdf = combined_gdf.copy()
+    mask_gdf["mask"] = 1
+
+    # Dissolve all polygons to identify connected ice-covered regions.
+    interaction_mask = mask_gdf.dissolve(by="mask")
 
     interaction_mask['geometry'] = interaction_mask['geometry'].apply(remove_holes)
 
@@ -238,6 +241,24 @@ def main():
 
     shelves_mask_fp = Path(args.data_path) / "remaining_shelves_mask.gpkg"
     remaining_ice_shelves.to_file(shelves_mask_fp, driver="GPKG")
+
+    ## Extra code to retain separate parts of the interaction mask
+    mainland_geometry = ice_from_mainland.geometry.union_all()
+    belongs_to_mainland = combined_gdf.geometry.representative_point().within(
+        mainland_geometry
+    )
+
+    combined_mainland_gdf = combined_gdf.loc[belongs_to_mainland].copy()
+    combined_mainland_gdf.reset_index(drop=True, inplace=True)
+
+    # Remove the temporary dissolve field if it happens to exist.
+    combined_mainland_gdf.drop(columns=["mask"], errors="ignore", inplace=True)
+
+    # Save the original individual polygons associated with AIS.
+    combined_mainland_fp = (
+            Path(args.data_path) / "interaction_mask_individual_polygons.gpkg"
+    )
+    combined_mainland_gdf.to_file(combined_mainland_fp, driver="GPKG")
 
     print('-------------------------')
     print('Finished with first mask')

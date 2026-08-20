@@ -2,3 +2,6 @@ dev_notebooks
 back_up_scripts
 data_files_bkp
 .idea
+data_files/intersection_mask.gpkg
+scripts/plot_coverage.py
+scripts/summarise_coverage_by_level.py
