@@ -318,7 +318,7 @@ def compute_single_polygon_valid_coverage(src,
         transform=window_transform,
         invert=True,
         out_shape=arr.shape,
-        all_touched=True,
+        all_touched=False,
     )
 
     # keep only raster cells that are both valid and inside the polygon footprint
