@@ -444,12 +444,6 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
     gdf = gpd.read_file(polygons_path)
 
     original_count = len(gdf)
-    print("\n=== FEATURE COUNT CHECK ===")
-    print(f"Input file: {polygons_path}")
-    print(f"Original feature count: {original_count}")
-    print(f"Original non-null geometries: {gdf.geometry.notna().sum()}")
-    print(f"Original empty geometries: {gdf.geometry.is_empty.sum()}")
-    print(f"Original index unique: {gdf.index.is_unique}")
 
     mask_footprint, raster_crs = build_mask_footprint(raster_path, band=band)
 
@@ -494,12 +488,6 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
     gdf_inside = gdf.loc[intersects_mask].copy()
 
     split_count = len(gdf_inside) + len(gdf_outside)
-
-    print("\n--- MASK FOOTPRINT SPLIT ---")
-    print(f"Original polygons: {original_count}")
-    print(f"Inside footprint: {len(gdf_inside)}")
-    print(f"Outside footprint: {len(gdf_outside)}")
-    print(f"Inside + outside: {split_count}")
 
     if split_count != original_count:
         raise RuntimeError(
@@ -579,46 +567,9 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
 
     result_df = pd.DataFrame.from_dict(combined_results, orient="index").sort_index()
 
-    print("\n--- RESULT DATAFRAME CHECK ---")
-    print(f"result_df rows: {len(result_df)}")
-    print(f"result_df index unique: {result_df.index.is_unique}")
-
-    missing_from_result_df = gdf.index.difference(result_df.index)
-
-    print(
-        "Original indices missing from result_df:",
-        len(missing_from_result_df),
-    )
-
-    if not missing_from_result_df.empty:
-        print(
-            "First missing indices:",
-            missing_from_result_df.tolist(),
-        )
-
     out = gdf.join(result_df.drop(columns=["polygon_label"], errors="ignore"), how="left")
 
-    print("\n--- FINAL JOIN CHECK ---")
-    print(f"Rows before join: {len(gdf)}")
-    print(f"Rows after join: {len(out)}")
-
     out = out.drop(columns=["_polygon_area_m2_sort", "_poly_label"], errors="ignore")
-
-    if diagnostics_csv is not None:
-        diagnostics_path = Path(diagnostics_csv)
-        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
-
-        diagnostics_df = (
-            out.drop(columns="geometry", errors="ignore")
-            .sort_values(
-                ["runtime_s", "valid_cells_in_window", "window_cells", "polygon_area_m2"],
-                ascending=False,
-            )
-            .copy()
-        )
-
-        diagnostics_df.to_csv(diagnostics_path, index=True)
-        print(f"Saved diagnostics: {diagnostics_path}")
 
     return out
 
