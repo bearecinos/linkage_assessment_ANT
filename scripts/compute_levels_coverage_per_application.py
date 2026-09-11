@@ -443,6 +443,14 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
     """
     gdf = gpd.read_file(polygons_path)
 
+    original_count = len(gdf)
+    print("\n=== FEATURE COUNT CHECK ===")
+    print(f"Input file: {polygons_path}")
+    print(f"Original feature count: {original_count}")
+    print(f"Original non-null geometries: {gdf.geometry.notna().sum()}")
+    print(f"Original empty geometries: {gdf.geometry.is_empty.sum()}")
+    print(f"Original index unique: {gdf.index.is_unique}")
+
     mask_footprint, raster_crs = build_mask_footprint(raster_path, band=band)
 
     if gdf.crs is None:
@@ -467,6 +475,13 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
             }
         ).T
         out = gdf.join(result_df, how="left")
+
+        if len(out) != original_count:
+            raise RuntimeError(
+                "Polygon count changed in mask_has_no_valid_cells branch: "
+                f"{original_count} -> {len(out)}"
+            )
+
         out = out.drop(columns=["_polygon_area_m2_sort", "_poly_label"], errors="ignore")
         return out
 
@@ -478,8 +493,20 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
     gdf_outside = gdf.loc[~intersects_mask].copy()
     gdf_inside = gdf.loc[intersects_mask].copy()
 
-    print(f"Polygons intersecting mask footprint: {len(gdf_inside)}")
-    print(f"Polygons outside mask footprint: {len(gdf_outside)}")
+    split_count = len(gdf_inside) + len(gdf_outside)
+
+    print("\n--- MASK FOOTPRINT SPLIT ---")
+    print(f"Original polygons: {original_count}")
+    print(f"Inside footprint: {len(gdf_inside)}")
+    print(f"Outside footprint: {len(gdf_outside)}")
+    print(f"Inside + outside: {split_count}")
+
+    if split_count != original_count:
+        raise RuntimeError(
+            "Polygons were lost while splitting into "
+            "gdf_inside and gdf_outside: "
+            f"{original_count} -> {split_count}"
+        )
 
     outside_results = {
         idx: zero_result(float(geom.area) if geom is not None and not geom.is_empty else np.nan, "outside_mask_footprint")
@@ -507,6 +534,16 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
         )
     ]
 
+    print("\n--- MULTIPROCESSING INPUT ---")
+    print(f"Inside polygons: {len(gdf_inside)}")
+    print(f"Items created: {len(items)}")
+
+    if len(items) != len(gdf_inside):
+        raise RuntimeError(
+            "Not every inside polygon was converted into a worker item: "
+            f"{len(gdf_inside)} inside polygons -> {len(items)} items"
+        )
+
     if n_processes is None:
         n_processes = max(1, (os.cpu_count() or 1) - 1)
 
@@ -525,6 +562,12 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
         }
 
     combined_results = {**outside_results, **inside_results}
+
+    print("\n--- COMBINED RESULTS ---")
+    print(f"Outside results: {len(outside_results)}")
+    print(f"Inside results: {len(inside_results)}")
+    print(f"Combined results: {len(combined_results)}")
+    print(f"Expected results: {original_count}")
 
     result_df = pd.DataFrame.from_dict(combined_results, orient="index").sort_index()
 
