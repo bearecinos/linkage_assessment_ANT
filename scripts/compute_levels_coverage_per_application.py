@@ -563,15 +563,45 @@ def attach_valid_coverage_to_polygons_parallel_pool(raster_path,
 
     combined_results = {**outside_results, **inside_results}
 
-    print("\n--- COMBINED RESULTS ---")
-    print(f"Outside results: {len(outside_results)}")
-    print(f"Inside results: {len(inside_results)}")
+    print("\n--- COMBINED RESULT CHECK ---")
+    print(f"Original rows: {original_count}")
     print(f"Combined results: {len(combined_results)}")
-    print(f"Expected results: {original_count}")
+
+    if len(combined_results) != original_count:
+        missing_indices = gdf.index.difference(
+            pd.Index(combined_results.keys())
+        )
+
+        raise RuntimeError(
+            "Coverage results are missing polygons. "
+            f"Missing indices: {missing_indices.tolist()[:30]}"
+        )
 
     result_df = pd.DataFrame.from_dict(combined_results, orient="index").sort_index()
 
+    print("\n--- RESULT DATAFRAME CHECK ---")
+    print(f"result_df rows: {len(result_df)}")
+    print(f"result_df index unique: {result_df.index.is_unique}")
+
+    missing_from_result_df = gdf.index.difference(result_df.index)
+
+    print(
+        "Original indices missing from result_df:",
+        len(missing_from_result_df),
+    )
+
+    if not missing_from_result_df.empty:
+        print(
+            "First missing indices:",
+            missing_from_result_df.tolist(),
+        )
+
     out = gdf.join(result_df.drop(columns=["polygon_label"], errors="ignore"), how="left")
+
+    print("\n--- FINAL JOIN CHECK ---")
+    print(f"Rows before join: {len(gdf)}")
+    print(f"Rows after join: {len(out)}")
+
     out = out.drop(columns=["_polygon_area_m2_sort", "_poly_label"], errors="ignore")
 
     if diagnostics_csv is not None:
