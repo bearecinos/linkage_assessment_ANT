@@ -30,13 +30,14 @@ import sys
 import time
 from multiprocessing import Pool
 from pathlib import Path
+import math
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
 import argparse
-from rasterio.windows import from_bounds
+from rasterio.windows import Window, from_bounds
 from shapely.geometry import box, shape
 from shapely.ops import unary_union
 from rasterio.features import geometry_mask, shapes
@@ -66,6 +67,11 @@ def parse_arguments():
 
 
 def validate_paths(args):
+    """
+    Makes sure paths to files exist
+    :param args:
+    :return: errors if files are not there
+    """
     if not args.application_mask.exists():
         sys.exit(f"Mask file not found: {args.application_mask}")
     if not args.data_path.exists():
@@ -127,7 +133,7 @@ def cell_polygon_from_rowcol(transform, row: int, col: int):
     """
     This converts one raster cell into a Shapely polygon
     :param transform: this is the raster affine transform to get the coordinates
-    of the cell corners
+    from the cell corners
     :param row: row indexes from the raster
     :param col: columns indexes from the raster
     :return: a rectangle polygon box
@@ -152,8 +158,11 @@ def valid_data_mask(arr):
 
 def build_mask_footprint(raster_path: str | Path, band: int = 1):
     """
-    We first turn the mask of valid data into a vector
-    To quickly remove everything outside that vector mask.
+    Convert all valid raster cells into a merged Shapely footprint.
+
+    Cells where valid_data_mask() returns True are vectorized and merged.
+    The resulting footprint is used to quickly reject polygons that do not
+    intersect any valid raster cell.
     :param raster path
     :param band (default to 1)
     :return: the merged footprint geometry
@@ -199,16 +208,20 @@ def compute_single_polygon_valid_coverage(src,
     """
     It computes the fraction of one polygon covered by valid raster cells.
     percent coverage= 100 x (poly area of polygon covered by valid raster cells/ polygon area)
-    :param src:
-    :param geom:
-    :param band:
-    :return:
+    :param src: Raster source
+    :param geom: geometry to compute coverage for
+    :param band: raster band
+    :return: dictionary with the result coverage for that polygon along with other stats
+    of the raster window.
     """
-    #Starts timer to check how each polygon takes
+    # Starts timer to check how each polygon takes
     t0 = time.perf_counter()
 
-    # First stage is dealing only with empty or out of coverage results
-    # reject invalid polygons
+    if band < 1 or band > src.count:
+        raise ValueError(
+            f"Invalid band {band}. Raster contains {src.count} band(s)."
+        )
+
     if geom is None or geom.is_empty or not geom.is_valid:
         result = empty_result()
         result["status"] = "invalid_geometry"
@@ -219,6 +232,7 @@ def compute_single_polygon_valid_coverage(src,
     polygon_area_m2 = float(geom.area)
     if polygon_area_m2 <= 0:
         result = empty_result()
+        result["polygon_area_m2"] = polygon_area_m2
         result["status"] = "zero_area"
         result["runtime_s"] = time.perf_counter() - t0
         return result
@@ -233,128 +247,121 @@ def compute_single_polygon_valid_coverage(src,
         or maxy <= raster_bounds.bottom
         or miny >= raster_bounds.top
     ):
-        return {
-            "polygon_area_m2": polygon_area_m2,
-            "covered_area_m2": 0.0,
-            "covered_area_km2": 0.0,
-            "valid_cell_count": 0,
-            "percent_coverage": 0.0,
-            "window_height": 0,
-            "window_width": 0,
-            "window_cells": 0,
-            "valid_cells_in_window": 0,
-            "runtime_s": time.perf_counter() - t0,
-            "status": "outside_raster_bounds",
-        }
+        result = zero_result(
+            polygon_area_m2,
+            "outside_raster_bounds",
+        )
+        result["runtime_s"] = time.perf_counter() - t0
+        return result
 
-    # Build a raster window around the polygon
-    window = from_bounds(
+    raw_window = from_bounds(
         left=minx,
         bottom=miny,
         right=maxx,
         top=maxy,
         transform=src.transform,
-    ).round_offsets().round_lengths()
+    )
 
-    #This makes sure the window does not ask
-    # for raster rows/columns outside the raster.
-    # It fixes cases where:
-    # - the polygon touches the raster edge
-    # - the bounds slightly exceed the raster extent
-    # - rounding pushes the window too far
-    row_off = max(0, int(window.row_off))
-    col_off = max(0, int(window.col_off))
-    height = min(src.height - row_off, int(window.height))
-    width = min(src.width - col_off, int(window.width))
+    # The window must contain the complete polygon bounding box.
+    row_start = max(0, math.floor(raw_window.row_off))
+    col_start = max(0, math.floor(raw_window.col_off))
+
+    row_stop = min(src.height,
+                   math.ceil(raw_window.row_off + raw_window.height)
+                   )
+    col_stop = min(src.width,
+                   math.ceil(raw_window.col_off + raw_window.width)
+                   )
+
+    height = row_stop - row_start
+    width = col_stop - col_start
 
     if height <= 0 or width <= 0:
-        return {
-            "polygon_area_m2": polygon_area_m2,
-            "covered_area_m2": 0.0,
-            "covered_area_km2": 0.0,
-            "valid_cell_count": 0,
-            "percent_coverage": 0.0,
-            "window_height": 0,
-            "window_width": 0,
-            "window_cells": 0,
-            "valid_cells_in_window": 0,
-            "runtime_s": time.perf_counter() - t0,
-            "status": "no_overlap",
-        }
+        result = zero_result(
+            polygon_area_m2,
+            "no_overlap",
+        )
+        result["runtime_s"] = time.perf_counter() - t0
+        return result
 
-    # count the total number of cells in the window
-    window_cells = int(height * width)
-
-    # create the final raster window and read it
-    window = rasterio.windows.Window(
-        col_off=col_off,
-        row_off=row_off,
+    window = Window(
+        col_off=col_start,
+        row_off=row_start,
         width=width,
         height=height,
     )
 
-    arr = src.read(band, window=window, masked=True)
-    if arr.size == 0:
-        return {
-            "polygon_area_m2": polygon_area_m2,
-            "covered_area_m2": 0.0,
-            "covered_area_km2": 0.0,
-            "valid_cell_count": 0,
-            "percent_coverage": 0.0,
-            "window_height": int(height),
-            "window_width": int(width),
-            "window_cells": window_cells,
-            "valid_cells_in_window": 0,
-            "runtime_s": time.perf_counter() - t0,
-            "status": "empty_read",
-        }
+    window_cells = int(height * width)
 
-    # get the transform for that local window
+    arr = src.read(
+        band,
+        window=window,
+        masked=True,
+    )
+
+    if arr.size == 0:
+        result = empty_result()
+        result.update(
+            {
+                "polygon_area_m2": polygon_area_m2,
+                "window_height": int(height),
+                "window_width": int(width),
+                "window_cells": window_cells,
+                "status": "empty_read",
+                "runtime_s": time.perf_counter() - t0,
+            }
+        )
+        return result
+
     window_transform = src.window_transform(window)
 
-    # rasterize the polygon footprint onto the local window
+    valid_mask = valid_data_mask(arr)
+
+    # all_touched=True only selects candidate cells.
+    # Exact covered area is still calculated below with Shapely.
     polygon_mask = geometry_mask(
         [geom],
         transform=window_transform,
         invert=True,
         out_shape=arr.shape,
-        all_touched=False,
+        all_touched=True,
     )
 
-    # keep only raster cells that are both valid and inside the polygon footprint
-    candidate_mask = valid_data_mask(arr) & polygon_mask
+    candidate_mask = valid_mask & polygon_mask
+
     valid_cells_in_window = int(candidate_mask.sum())
 
     if valid_cells_in_window == 0:
-        return {
-            "polygon_area_m2": polygon_area_m2,
-            "covered_area_m2": 0.0,
-            "covered_area_km2": 0.0,
-            "valid_cell_count": 0,
-            "percent_coverage": 0.0,
-            "window_height": int(height),
-            "window_width": int(width),
-            "window_cells": window_cells,
-            "valid_cells_in_window": 0,
-            "runtime_s": time.perf_counter() - t0,
-            "status": "no_valid_cells",
-        }
+        result = zero_result(
+            polygon_area_m2,
+            "no_valid_cells",
+        )
+        result.update(
+            {
+                "window_height": int(height),
+                "window_width": int(width),
+                "window_cells": window_cells,
+                "valid_cells_in_window": 0,
+                "runtime_s": time.perf_counter() - t0,
+            }
+        )
+        return result
 
     prepared_geom = prep(geom)
 
     covered_area_m2 = 0.0
-    intersecting_valid_region_count = 0
+    valid_region_count = 0
 
     # Instead of looping over every raster cell one by one,
-    # it uses shapes(...) to convert connected valid raster regions into vector polygons.
+    # it uses shapes(...) to convert connected or non-connected
+    # valid raster regions into vector polygons.
     # So if many neighboring valid cells touch each other,
     # they become one larger region polygon.
     # That is much faster than intersecting cell-by-cell
-    for geom_dict, value in shapes(
-        candidate_mask.astype(np.uint8),
-        mask=candidate_mask,
-        transform=window_transform,
-    ):
+    for geom_dict, value in shapes(candidate_mask.astype(np.uint8),
+                                   mask=candidate_mask,
+                                   transform=window_transform):
+
         # ignore anything that is not a valid region
         if value != 1:
             continue
@@ -366,19 +373,35 @@ def compute_single_polygon_valid_coverage(src,
         if not prepared_geom.intersects(valid_region):
             continue
 
-        # compute exact overlap area
-        inter = valid_region.intersection(geom)
-        if not inter.is_empty:
-            covered_area_m2 += inter.area
-            intersecting_valid_region_count += 1
+        # Calculate the exact overlap
+        intersection = valid_region.intersection(geom)
+        if intersection.is_empty:
+            continue
 
-    percent_coverage = 100.0 * covered_area_m2 / polygon_area_m2
+        intersection_area = float(intersection.area)
+        # Boundary-only contact has no area and is not coverage.
+        if intersection_area <= 0:
+            continue
+
+        covered_area_m2 += intersection_area
+        valid_region_count += 1
+
+    percent_coverage = (100.0 * covered_area_m2 / polygon_area_m2)
+
+    # Protect against tiny floating-point errors such as
+    # 100.00000000001.
+    if math.isclose(percent_coverage,
+                    100.0,
+                    rel_tol=0.0,
+                    abs_tol=1e-9):
+        percent_coverage = 100.0
 
     return {
         "polygon_area_m2": polygon_area_m2,
         "covered_area_m2": float(covered_area_m2),
         "covered_area_km2": float(covered_area_m2 / 1e6),
-        "valid_cell_count": int(intersecting_valid_region_count),
+        "valid_cell_count": valid_cells_in_window,
+        "valid_region_count": int(valid_region_count),
         "percent_coverage": float(percent_coverage),
         "window_height": int(height),
         "window_width": int(width),
