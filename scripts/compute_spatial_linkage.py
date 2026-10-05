@@ -307,7 +307,7 @@ def main():
     cols.insert(cols.index("detachment_score") + 1, cols.pop(cols.index("attachment_score")))
     combined_final = combined_final[cols]
 
-    filename = Path(args.data_path) / f"final_classification_buckets.gpkg"
+    filename = Path(args.data_path) / f"attachment_scores_buckets.gpkg"
     combined_final.to_file(filename, driver="GPKG")
 
 if __name__ == "__main__":

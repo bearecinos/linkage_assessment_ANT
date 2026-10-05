@@ -5,7 +5,7 @@ complex dataset, the ice rises and rumples dataset and additional ice-shelf mask
 help with the final scoring.
 
 Outputs:
-1. final_classification_buckets_w_levels.gpkg
+1. attachment_level_classification_v1.gpkg
 2. RGI-GCv7_with_levels.gpkg
 3. IRRv1_with_levels.gpkg
 4. Stats CSVs: level_area_stats.csv, level_area_metrics.csv
@@ -126,7 +126,7 @@ def apply_level(out_df, level_df, key="analysis_id"):
     - **Level 1** - Weak attachment: 39-1% perimeter overlap scores -> 1.9 - 1.7 if chosen default
     - **Level 2** - Strong attachment: 40-99% perimeter overlap scores -> 1.6 - 1.1 if chosen default
     - **Level 3** - Attached: 100% perimeter overlap scores -> 1.0
-    :param out_df: same file as final_classification_buckets.gpkg but with levels of detachment
+    :param out_df: same file as attachment_level_classification_v1.gpkg but with levels of detachment
     :param level_df: the final grouping for each level
     :param key: column name
     :return: out_df with the right detachment level assigned
@@ -149,6 +149,144 @@ def _att_range(dmin: float, dmax: float):
     amax = round(2.0 - dmin, 2)
     return f"attachment_score in [{amin}, {amax}]"
 
+
+def parse_id_list(value):
+    """
+    Convert an ID field to a Python list.
+    :param row value in RGIIds or icerise_id
+    """
+    if isinstance(value, list):
+        return value
+
+    if pd.isna(value):
+        return []
+
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)
+            return parsed if isinstance(parsed, list) else [parsed]
+        except (ValueError, SyntaxError):
+            return [value]
+
+    return [value]
+
+
+def build_irr_type_lookup(rise_rumple):
+    """
+    Build:
+        id_icerise -> {
+            "ice_type": ...,
+            "ice_type_text": ...
+        }
+    """
+    return (
+        rise_rumple
+        .set_index("id_icerise")[["type", "type_text"]]
+        .to_dict("index")
+    )
+
+
+def get_inventory_ice_types(row, irr_lookup):
+    """
+    Determine ice_type and ice_type_text for one row.
+    :param row comes from the attachment levels file
+    :param irr_lookup lookup table (e.g. rise_rumple dataset)
+
+    Rules:
+    - one RGI ID -> 0, "Glacier complex"
+    - one IRR ID -> type from IRR inventory
+    - multiple IDs -> retain classifications as lists
+
+    Exception:
+    - exactly one RGI ID + exactly one IRR ID:
+      trust the IRR inventory only.
+    """
+
+    rgi_ids = parse_id_list(row["rgi_ids"])
+    irr_ids = parse_id_list(row["id_icerise"])
+
+    # ---------------------------------------------------------
+    # Exception:
+    # one RGI + one IRR -> trust IRR classification only
+    # ---------------------------------------------------------
+    if len(rgi_ids) == 1 and len(irr_ids) == 1:
+        irr_id = irr_ids[0]
+
+        if irr_id not in irr_lookup:
+            raise ValueError(
+                f"IRR ID {irr_id} not found in IRR inventory"
+            )
+
+        return pd.Series([
+            irr_lookup[irr_id]["type"],
+            irr_lookup[irr_id]["type_text"],
+        ])
+
+    ice_types = []
+    ice_type_texts = []
+
+    # ---------------------------------------------------------
+    # RGI classifications
+    # ---------------------------------------------------------
+    for _ in rgi_ids:
+        ice_types.append(0)
+        ice_type_texts.append("Glacier complex")
+
+    # ---------------------------------------------------------
+    # IRR classifications
+    # ---------------------------------------------------------
+    for irr_id in irr_ids:
+
+        if irr_id not in irr_lookup:
+            raise ValueError(
+                f"IRR ID {irr_id} not found in IRR inventory"
+            )
+
+        ice_types.append(
+            irr_lookup[irr_id]["type"]
+        )
+
+        ice_type_texts.append(
+            irr_lookup[irr_id]["type_text"]
+        )
+
+    # No RGI or IRR IDs -> keep existing classification
+    if len(ice_types) == 0:
+        return pd.Series([
+            row["ice_type"],
+            row["ice_type_text"],
+        ])
+
+    # Exactly one inventory object -> scalar
+    if len(ice_types) == 1:
+        return pd.Series([
+            ice_types[0],
+            ice_type_texts[0],
+        ])
+
+    # Multiple inventory objects -> retain all classifications
+    return pd.Series([
+        ice_types,
+        ice_type_texts,
+    ])
+
+
+def correct_inventory_ice_types(out, rise_rumple):
+    """
+    Correct ice_type and ice_type_text for the final dataset.
+    """
+
+    corrected = out.copy()
+
+    irr_lookup = build_irr_type_lookup(rise_rumple)
+
+    corrected[["ice_type", "ice_type_text"]] = corrected.apply(
+        get_inventory_ice_types,
+        axis=1,
+        args=(irr_lookup,),
+    )
+
+    return corrected
 
 def main():
     args = parse_arguments()
@@ -206,7 +344,7 @@ def main():
     remaining_shelves = os.path.join(args.data_path, 'remaining_shelves_mask.gpkg')
     other_shelves = gpd.read_file(remaining_shelves)
 
-    final_classification = os.path.join(args.data_path, 'final_classification_buckets.gpkg')
+    final_classification = os.path.join(args.data_path, 'attachment_scores_buckets.gpkg')
     final_df = gpd.read_file(final_classification)
 
     only_icesheet['surface'] = 'Ice sheet'
@@ -394,7 +532,18 @@ def main():
         missing = out.loc[out["level"].isna(), KEY].head(20).tolist()
         raise ValueError(f"Unassigned rows after merges. Example {KEY}s: {missing}")
 
-    filename = Path(args.data_path) / "final_classification_buckets_w_levels.gpkg"
+    # Correct ice_type and ice_type_text using RGI + IRR inventories
+    out = correct_inventory_ice_types(
+        out,
+        rise_rumple,
+    )
+
+    out[["ice_type", "ice_type_text"]] = out[["ice_type", "ice_type_text"]].apply(
+        lambda col: col.map(lambda x: x[0] if isinstance(x,
+                                                         list) and x and all(v == x[0] for v in x) else x)
+    )
+
+    filename = Path(args.data_path) / "attachment_level_classification_v1.gpkg"
     out.to_file(filename, driver="GPKG")
 
     # Assigning levels to RGI data set

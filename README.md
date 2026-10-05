@@ -1,6 +1,6 @@
 ## Attachment levels of Antarctic and Sub-Antarctic ice bodies from the Ice Sheet: a perimeter-overlap classification
 
-This project performs a spatial analysis to determine the degree of spatial connectivity or "attachment" between glacier complexes and surrounding Antarctic ice types—namely the ice sheet, ice shelves and ice tongues. The linkage classification is also done on Ice rises and rumples.
+This project performs a spatial analysis to determine the degree of spatial connectivity or "attachment" between glacier complexes and surrounding Antarctic ice types—namely the ice sheet, ice shelves and ice tongues. The attachment levels classification is also done on Ice rises and rumples.
 
 The workflow consists of two scripts:
 
@@ -49,7 +49,7 @@ This script builds the following:
 Outputs:
 - `interaction_mask.gpkg`: a unified polygon for the main ice sheet, ice shelves and ice tongues.
 - `remaining_shelves_mask.gpkg`: island shelves
-- `ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg`: Combined coastline sections which are polygons representing glacier complexes, ice rises and rumples for linkage analysis.
+- `ADD_polys_with_RGI-GCv7_IRRv1_combined.gpkg`: Combined coastline sections which are polygons representing glacier complexes, ice rises and rumples for attachment analysis.
 
 #### Usage
 ```bash
@@ -60,16 +60,16 @@ python preprocess_ice_types_masks.py \
   --data_path path/to/output_directory
 ```
 
-## 2. Linkage classification – `compute_spatial_linkage.py`
+## 2. Attachment scores classification – `compute_spatial_linkage.py`
 
-This script performs the **core spatial linkage assessment** by quantifying how much of each polygon’s perimeter is shared with the main Antarctic ice system.
+This script performs the **hi-resolution attachment assessment** by quantifying how much of each polygon’s perimeter is shared with the main Antarctic ice system.
 
 ### Key components
 
 The analysis combines three masks:
 
 - #### Interaction mask (`interaction_mask.gpkg`)
-   Used as the reference for spatial linkage  
+   Used as the reference for geometric attachment  
 
 - #### Secondary shelf mask (`remaining_shelves_mask.gpkg`)
    Ice shelves originating from islands (not connected to the mainland). Used to evaluate buttressing of detached features  
@@ -83,7 +83,7 @@ Polygons to evaluate:
 
 ### Method
 
-#### Perimeter-overlap linkage
+#### Perimeter-overlap attachment scores
 
 For each polygon, the script computes:
 - Total perimeter  
@@ -112,12 +112,12 @@ The percentage overlap is converted into **attachment scores**, while an equival
 
 Notes / conventions
 - Perimeter Overlap is computed as percentage of the assessment polygon’s perimeter that touches the primary interaction mask.
-- Score uses the decimal detachment scheme: 1.0 … 1.9 (progressively weaker linkage), 2.0 = fully detached.
+- Score uses the decimal detachment scheme: 1.0 … 1.9 (progressively weaker attachment), 2.0 = fully detached.
 - Buttress Code: 1.0 = buttressed by a non-mainland (island-origin) shelf; 0.0 = not buttressed / unclassified.
 - An attachment score is introduced to convert categories into connectivity levels comparable to Greenland. **Computed to provide an alternative framing of the same relationship.**
 
 Outputs:
-- `final_classification_buckets.gpkg`: GeoPackage with one row per polygon, including its `attachment_score`, a `descriptor` and original RGI-ids or IRR-ids.
+- `attachment_scores_buckets.gpkg`: GeoPackage with one row per polygon, including its `attachment_score`, a `descriptor` and original RGI-ids or IRR-ids.
 
 #### Usage
 ```bash
@@ -146,7 +146,7 @@ This follows a **“most attached = highest level”** logic in line with Greenl
 ### Method
 
 #### 1. Initial classification
-- Uses `final_classification_buckets.gpkg`  
+- Uses `attachment_scores_buckets.gpkg`  
 - Assigns polygons into Levels 0–3 based on score thresholds  
 
 #### 2. Indirect connectivity (key feature ⭐)
@@ -184,7 +184,7 @@ Levels are propagated to:
 
 ### Outputs
 
-- `final_classification_buckets_w_levels.gpkg`  
+- `attachment_level_classification_v1.gpkg`  
   → Polygon-level results with levels  
 
 - `RGI-GCv7_with_levels.gpkg`  
@@ -216,5 +216,5 @@ Celia Baumhoer, Beatriz Recinos Rivas, Bertie Miles, Mathieu Morlighem, Fabien M
 
 Citation
 --------
-Recinos, B., & Baumhoer, C. (2026). bearecinos/linkage_assessment_ANT: Spatial linkage assessment for Glacier Complexes and Ice rises and rumples (Antarctic Region, RGIv7) — Pre-release (v1.0.0-beta.1). Zenodo.
+Recinos, B., & Baumhoer, C. (2026). bearecinos/linkage_assessment_ANT: Spatial attachment levels for Glacier Complexes and Ice rises and rumples (Antarctic Region, RGIv7) — Pre-release (v1.0.0-beta.1). Zenodo.
 [![DOI](https://zenodo.org/badge/1091078829.svg)](https://doi.org/10.5281/zenodo.18175061)
