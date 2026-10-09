@@ -216,4 +216,4 @@ Celia Baumhoer, Beatriz Recinos Rivas, Bertie Miles, Mathieu Morlighem, Fabien M
 
 Citation
 --------
-Recinos, B., & Baumhoer, C. (2026). Attachment levels of Antarctic and Sub-Antarctic ice bodies from the Ice Sheet: a perimeter-overlap classification (Version v1.0.0-beta.2). Zenodo. [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23262609.svg)](https://doi.org/10.5281/zenodo.23262609)
+Recinos, B., & Baumhoer, C. (2026). Attachment levels of Antarctic and Sub-Antarctic ice bodies from the Ice Sheet: a perimeter-overlap classification (Version v1.0.0-beta.2). Zenodo. [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23262609-blue.svg)](https://doi.org/10.5281/zenodo.23262609)
